@@ -67,6 +67,7 @@
   right: 18px;
   top: calc(50% - 171px);
   width: 48px;
+  pointer-events: auto;
   background: var(--bg-primary);
   border-radius: 100px;
   box-shadow: var(--pill-shadow);
