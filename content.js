@@ -141,4 +141,7 @@
 
   const { initPillPlayer } = await import(chrome.runtime.getURL('src/pill-player.js'));
   initPillPlayer(shadow, state, actions, paragraphs);
+
+  const { initSidePanels } = await import(chrome.runtime.getURL('src/side-panels.js'));
+  initSidePanels(shadow, state, actions);
 })();
