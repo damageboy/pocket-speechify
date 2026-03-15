@@ -16,4 +16,827 @@
   --bg-primary-dark: #121212;
   --text-tertiary: #7a7a7a;
   --accent-blue: #5c6ae5;
+  --pill-shadow:
+    0px 0px 0px 0px rgba(106, 120, 252, 0.5),
+    0px 0px 2px 0px rgba(106, 120, 252, 0.49),
+    0px 0px 3px 0px rgba(106, 120, 252, 0.43),
+    0px 0px 4px 0px rgba(106, 120, 252, 0.25),
+    0px 0px 4px 0px rgba(106, 120, 252, 0.07),
+    0px 0px 5px 0px rgba(106, 120, 252, 0.01);
+  --panel-shadow:
+    0px 0px 0px 0px rgba(106, 120, 252, 0.5),
+    0px 0px 2px 0px rgba(106, 120, 252, 0.49),
+    0px 0px 3px 0px rgba(106, 120, 252, 0.43),
+    0px 0px 4px 0px rgba(106, 120, 252, 0.25),
+    0px 0px 4px 0px rgba(106, 120, 252, 0.07),
+    0px 0px 5px 0px rgba(106, 120, 252, 0.01),
+    0px 4px 6px 0px rgba(0, 0, 0, 0.32);
+}
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* ============================================================
+   PILL CONTAINER
+   ============================================================ */
+
+.pill-container {
+  position: fixed;
+  right: 18px;
+  top: calc(50% - 171px);
+  width: 48px;
+  background: var(--bg-primary);
+  border-radius: 100px;
+  box-shadow: var(--pill-shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0 8px;
+  gap: 4px;
+  z-index: 2147483645;
+  cursor: move;
+  font-family: system-ui, sans-serif;
+  color: var(--text-primary);
+  user-select: none;
+  animation: slideIn 0.08s ease-out both;
+  /* Height transition for hover expand */
+  transition: height 150ms ease-in-out;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* ============================================================
+   PILL MAIN SECTION (always visible)
+   ============================================================ */
+
+.pill-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+/* ============================================================
+   PILL BOTTOM SECTION (hover/expanded reveal)
+   ============================================================ */
+
+.pill-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.05s ease-in-out;
+}
+
+.pill-container:hover .pill-bottom,
+.pill-container.expanded .pill-bottom {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* While height transition is running, keep bottom hidden */
+.pill-bottom.animating {
+  opacity: 0;
+}
+
+/* ============================================================
+   BUTTON BASE RESET
+   ============================================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- Size variants ---- */
+
+.btn-48 {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+
+.btn-32 {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.btn-20 {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.btn-16 {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+/* ---- CTA (play/pause) ---- */
+
+.btn-cta {
+  background: var(--bg-cta);
+}
+
+.btn-cta:hover {
+  background: var(--bg-cta-hover);
+}
+
+.btn-cta:active {
+  background: var(--bg-cta-active);
+}
+
+/* ---- Standard (voice, speed, etc.) ---- */
+
+.btn-standard {
+  background: transparent;
+}
+
+.btn-standard:hover {
+  background: var(--bg-hover);
+}
+
+.btn-standard:active {
+  background: var(--bg-active);
+}
+
+/* ---- Turn-off button ---- */
+
+.btn-turnoff {
+  background: var(--bg-divider);
+}
+
+.btn-turnoff svg path {
+  fill: var(--text-secondary);
+  transition: fill 0.1s ease;
+}
+
+.btn-turnoff:hover svg path {
+  fill: var(--text-primary);
+}
+
+/* ---- Disabled state ---- */
+
+.btn-disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ============================================================
+   DURATION DISPLAY
+   ============================================================ */
+
+.duration {
+  width: 48px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  font-family: system-ui, sans-serif;
+  text-align: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.duration-mins,
+.duration-secs {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.duration-separator {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0.5px;
+}
+
+/* ============================================================
+   DIVIDER
+   ============================================================ */
+
+.divider {
+  width: 28px;
+  height: 2px;
+  background: var(--bg-divider);
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* ============================================================
+   PROGRESS RING (around play/pause button during playback)
+   ============================================================ */
+
+.progress-ring {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.progress-ring svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.progress-ring .btn-cta {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================================
+   SKIP BUTTONS CONTAINER
+   ============================================================ */
+
+.skip-buttons {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 48px;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   SIDE PANELS (voice & speed)
+   ============================================================ */
+
+.side-panel {
+  position: absolute;
+  right: 60px;
+  top: -12px;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  box-shadow: var(--panel-shadow);
+  font-family: system-ui, sans-serif;
+  color: var(--text-primary);
+  overflow: hidden;
+  animation: fadeIn 0.1s ease-out both;
+  z-index: 2147483644;
+}
+
+.side-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 8px;
+  position: relative;
+}
+
+.side-panel-header h2,
+.side-panel-header .panel-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.panel-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 0;
+  opacity: 1;
+  transition: opacity 0.1s ease;
+}
+
+.panel-close-btn:hover {
+  opacity: 0.75;
+}
+
+.panel-close-btn:active {
+  opacity: 0.5;
+}
+
+/* ============================================================
+   VOICE PANEL
+   ============================================================ */
+
+.voice-panel {
+  width: 400px;
+  max-height: 510px;
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+  background: var(--bg-divider);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.voice-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  caret-color: var(--bg-cta);
+}
+
+.voice-search input::placeholder {
+  color: var(--text-secondary);
+}
+
+.voice-search svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.voice-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-hover) transparent;
+}
+
+.voice-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.voice-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.voice-list::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: 2px;
+}
+
+.voice-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  padding: 8px 8px 4px;
+}
+
+.voice-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.voice-item:hover {
+  background: var(--bg-hover);
+}
+
+.voice-item.selected {
+  background: var(--bg-active);
+}
+
+.voice-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--accent-blue);
+  overflow: hidden;
+}
+
+.voice-avatar.large {
+  width: 64px;
+  height: 64px;
+  font-size: 24px;
+}
+
+.voice-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.voice-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.voice-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-lang {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   SPEED PANEL
+   ============================================================ */
+
+.speed-panel {
+  width: 360px;
+  max-height: 422px;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+.speed-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.speed-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.speed-display .speed-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 80px;
+  text-align: center;
+}
+
+.speed-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.speed-controls .btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 20px;
+  font-weight: 400;
+  background: var(--bg-divider);
+  color: var(--text-primary);
+}
+
+.speed-controls .btn:hover {
+  background: var(--bg-hover);
+}
+
+.speed-controls .btn:active {
+  background: var(--bg-active);
+}
+
+.speed-presets {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.speed-preset-btn {
+  flex: 1;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-divider);
+  color: var(--text-secondary);
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.speed-preset-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.speed-preset-btn.active {
+  background: var(--bg-cta);
+  color: var(--text-primary);
+}
+
+.speed-preset-btn:active {
+  background: var(--bg-cta-active);
+  color: var(--text-primary);
+}
+
+/* Range slider */
+.speed-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-divider);
+  outline: none;
+  cursor: pointer;
+}
+
+.speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1e1e1e;
+  border: 2px solid var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.speed-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1e1e1e;
+  border: 2px solid var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Auto-increase toggle row */
+.speed-auto-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.speed-auto-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.speed-auto-label .title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.speed-auto-label .subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-divider);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.toggle input:checked + .toggle-track {
+  background: var(--bg-cta);
+}
+
+.toggle-track::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 3px;
+  top: 3px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.toggle input:checked + .toggle-track::before {
+  transform: translateX(18px);
+}
+
+/* ============================================================
+   HOVER PLAYER (paragraph play button)
+   ============================================================ */
+
+.hover-player {
+  position: fixed;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483640;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+  animation: fadeIn 0.1s ease-out both;
+}
+
+.hover-player:hover {
+  opacity: 0.75;
+}
+
+.hover-player:active {
+  opacity: 0.5;
+}
+
+.hover-player.fade-out {
+  animation: fadeOut 0.2s ease-out forwards;
+}
+
+/* Progress bar on top of hover player during playback */
+.hover-player-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 4px 0 0 4px;
+  background: linear-gradient(90deg, #4759f7 52.5%, rgba(107, 120, 252, 0) 93.6%);
+  width: 0%;
+  transition: width 0.1s linear;
+}
+
+/* ============================================================
+   SCROLL-TO-HIGHLIGHT NAV WIDGET
+   ============================================================ */
+
+.scroll-nav {
+  position: fixed;
+  z-index: 2147483646;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-divider);
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 60px;
+  box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.16);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  font-family: system-ui, sans-serif;
+  opacity: 0;
+  transition: all 0.25s ease-out;
+  cursor: pointer;
+}
+
+.scroll-nav.visible {
+  opacity: 1;
+}
+
+.scroll-nav.top {
+  top: 16px;
+  margin-top: -30px;
+}
+
+.scroll-nav.top.visible {
+  margin-top: 0;
+}
+
+.scroll-nav.bottom {
+  bottom: 16px;
+  transform: translate(-50%, -100%);
+  margin-bottom: -30px;
+}
+
+.scroll-nav.bottom.visible {
+  margin-bottom: 0;
+}
+
+.scroll-nav:hover .scroll-nav-arrow,
+.scroll-nav:hover .scroll-nav-word {
+  opacity: 0.75;
+}
+
+.scroll-nav:active .scroll-nav-arrow,
+.scroll-nav:active .scroll-nav-word {
+  opacity: 0.5;
+}
+
+.scroll-nav-arrow {
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  transition: opacity 0.1s ease;
+}
+
+.scroll-nav.top .scroll-nav-arrow {
+  transform: rotate(180deg);
+}
+
+.scroll-nav-word {
+  background: var(--highlight-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.43;
+  letter-spacing: -0.07px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: opacity 0.1s ease;
 }
