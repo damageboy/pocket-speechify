@@ -1,10 +1,103 @@
-import { waveformIcon, playIcon, bookmarkIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
 
 function formatDuration(totalSec, elapsedSec) {
   const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
   return { mins: String(mins), secs: String(secs).padStart(2, '0') };
+}
+
+// Build idle play button
+function renderIdlePlayButton(hasContent, actions) {
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-32 btn-cta';
+  if (!hasContent) btn.classList.add('btn-disabled');
+  btn.setAttribute('aria-label', 'Play');
+  const ic = playIcon();
+  ic.style.width = '14px';
+  ic.style.height = '14px';
+  btn.appendChild(ic);
+  if (hasContent) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      actions.play();
+    });
+  }
+  return btn;
+}
+
+// Build playing/paused UI: progress ring wrapping toggle button + skip buttons row
+function renderActiveControls(playbackState, percent, actions) {
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 4px;';
+
+  const ring = document.createElement('div');
+  ring.className = 'progress-ring';
+
+  const progressSvg = circularProgress(percent);
+  progressSvg.style.cssText = 'width: 100%; height: 100%;';
+  ring.appendChild(progressSvg);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'btn btn-32 btn-cta';
+
+  if (playbackState === 'playing') {
+    toggleBtn.setAttribute('aria-label', 'Pause');
+    const ic = pauseIcon();
+    ic.style.width = '10px';
+    ic.style.height = '12px';
+    toggleBtn.appendChild(ic);
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      actions.pause();
+    });
+  } else {
+    toggleBtn.setAttribute('aria-label', 'Resume');
+    const ic = playIcon();
+    ic.style.width = '14px';
+    ic.style.height = '14px';
+    toggleBtn.appendChild(ic);
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      actions.resume();
+    });
+  }
+
+  ring.appendChild(toggleBtn);
+  wrapper.appendChild(ring);
+
+  const skipRow = document.createElement('div');
+  skipRow.className = 'skip-buttons';
+
+  const skipBackBtn = document.createElement('button');
+  skipBackBtn.className = 'btn btn-16';
+  skipBackBtn.setAttribute('aria-label', 'Skip back');
+  skipBackBtn.style.cssText = 'background: transparent; padding: 0;';
+  const sbIcon = skipBackIcon();
+  sbIcon.style.cssText = 'width: 16px; height: 16px;';
+  skipBackBtn.appendChild(sbIcon);
+  skipBackBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    actions.skipBack();
+  });
+
+  const skipFwdBtn = document.createElement('button');
+  skipFwdBtn.className = 'btn btn-16';
+  skipFwdBtn.setAttribute('aria-label', 'Skip forward');
+  skipFwdBtn.style.cssText = 'background: transparent; padding: 0;';
+  const sfIcon = skipForwardIcon();
+  sfIcon.style.cssText = 'width: 16px; height: 16px;';
+  skipFwdBtn.appendChild(sfIcon);
+  skipFwdBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    actions.skipForward();
+  });
+
+  skipRow.appendChild(skipBackBtn);
+  skipRow.appendChild(skipFwdBtn);
+  wrapper.appendChild(skipRow);
+
+  return wrapper;
 }
 
 export function initPillPlayer(shadow, state, actions, paragraphs) {
@@ -50,25 +143,11 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   minsSpan.textContent = initDur.mins;
   secsSpan.textContent = initDur.secs;
 
-  // 3. Play button (32x32)
-  const playBtn = document.createElement('button');
-  playBtn.className = 'btn btn-32 btn-cta';
-  if (!hasContent) {
-    playBtn.classList.add('btn-disabled');
-  }
-  playBtn.setAttribute('aria-label', 'Play');
-  const playIc = playIcon();
-  playIc.style.width = '14px';
-  playIc.style.height = '14px';
-  playBtn.appendChild(playIc);
-
-  if (hasContent) {
-    playBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      actions.play();
-    });
-  }
-  pillMain.appendChild(playBtn);
+  // 3. Play area — swaps between idle play button and active (progress ring + skips)
+  const playArea = document.createElement('div');
+  playArea.className = 'play-area';
+  playArea.appendChild(renderIdlePlayButton(hasContent, actions));
+  pillMain.appendChild(playArea);
 
   // 4. Divider (28x2)
   const divider = document.createElement('div');
@@ -202,6 +281,34 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     // Update speed text
     if (current.speed !== prev.speed) {
       speedText.textContent = `${current.speed}x`;
+    }
+
+    const percent = current.totalDurationSec > 0
+      ? (current.elapsedSec / current.totalDurationSec) * 100
+      : 0;
+
+    if (current.playback !== prev.playback) {
+      // Playback state changed — rebuild play area content
+      while (playArea.firstChild) playArea.removeChild(playArea.firstChild);
+      if (current.playback === 'idle') {
+        playArea.appendChild(renderIdlePlayButton(hasContent, actions));
+      } else {
+        playArea.appendChild(renderActiveControls(current.playback, percent, actions));
+      }
+    } else if (
+      (current.playback === 'playing' || current.playback === 'paused') &&
+      (current.elapsedSec !== prev.elapsedSec || current.totalDurationSec !== prev.totalDurationSec)
+    ) {
+      // Progress changed — swap just the circular progress SVG
+      const ring = playArea.querySelector('.progress-ring');
+      if (ring) {
+        const oldSvg = ring.querySelector('svg');
+        if (oldSvg) {
+          const newSvg = circularProgress(percent);
+          newSvg.style.cssText = 'width: 100%; height: 100%;';
+          ring.replaceChild(newSvg, oldSvg);
+        }
+      }
     }
   });
 

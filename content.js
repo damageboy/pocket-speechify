@@ -53,6 +53,16 @@
     });
   });
 
+  // Helper: count total words before a given paragraph+sentence position
+  function wordsBefore(endParaIdx, endSentIdx = 0) {
+    let total = 0;
+    for (let i = 0; i < endParaIdx; i++)
+      total += paragraphs[i].sentences.reduce((s, sent) => s + sent.words.length, 0);
+    for (let i = 0; i < endSentIdx; i++)
+      total += paragraphs[endParaIdx].sentences[i].words.length;
+    return total;
+  }
+
   // Actions object bridges UI clicks to TTS + state
   const actions = {
     play(fromParagraph = 0) {
@@ -79,8 +89,48 @@
         elapsedSec: 0,
       });
     },
-    skipForward() { /* wired in Task 8 */ },
-    skipBack() { /* wired in Task 8 */ },
+    skipForward() {
+      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } = state.get();
+      if (pIdx === null) return;
+      const para = paragraphs[pIdx];
+      let newPIdx = pIdx, newSIdx = sIdx + 1;
+      if (newSIdx >= para.sentences.length) {
+        newPIdx = pIdx + 1;
+        newSIdx = 0;
+      }
+      if (newPIdx >= paragraphs.length) return;
+      wordsConsumed = wordsBefore(newPIdx, newSIdx);
+      tts.stop();
+      tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
+      state.dispatch({
+        currentParagraphIndex: newPIdx,
+        currentSentenceIndex: newSIdx,
+        currentWordIndex: 0,
+        elapsedSec: wordsConsumed / (state.get().speed * 4),
+      });
+    },
+    skipBack() {
+      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = state.get();
+      if (pIdx === null) return;
+      let newPIdx = pIdx, newSIdx = sIdx;
+      if (wIdx < 2) {
+        newSIdx = sIdx - 1;
+        if (newSIdx < 0) {
+          newPIdx = pIdx - 1;
+          if (newPIdx < 0) { newPIdx = 0; newSIdx = 0; }
+          else { newSIdx = paragraphs[newPIdx].sentences.length - 1; }
+        }
+      }
+      wordsConsumed = wordsBefore(newPIdx, newSIdx);
+      tts.stop();
+      tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
+      state.dispatch({
+        currentParagraphIndex: newPIdx,
+        currentSentenceIndex: newSIdx,
+        currentWordIndex: 0,
+        elapsedSec: wordsConsumed / (state.get().speed * 4),
+      });
+    },
     setSpeed(speed) {
       tts.setSpeed(speed);
       const tw = paragraphs.reduce((sum, p) =>
