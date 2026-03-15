@@ -1,0 +1,39 @@
+const INITIAL_STATE = {
+  playback: 'idle',
+  currentParagraphIndex: null,
+  currentSentenceIndex: null,
+  currentWordIndex: null,
+  speed: 1.0,
+  voiceId: null,
+  panelOpen: null,
+  pillExpanded: false,
+  totalDurationSec: 0,
+  elapsedSec: 0,
+};
+
+export function createState() {
+  const bus = new EventTarget();
+  let state = { ...INITIAL_STATE };
+
+  function get() {
+    return { ...state };
+  }
+
+  function dispatch(patch) {
+    const prev = state;
+    state = { ...state, ...patch };
+    bus.dispatchEvent(new CustomEvent('statechange', {
+      detail: { current: { ...state }, prev }
+    }));
+  }
+
+  function subscribe(fn) {
+    bus.addEventListener('statechange', (e) => fn(e.detail.current, e.detail.prev));
+  }
+
+  function reset() {
+    dispatch({ ...INITIAL_STATE });
+  }
+
+  return { get, dispatch, subscribe, reset };
+}
