@@ -83,8 +83,9 @@ function updateHighlights(currentState, paragraphs, theme) {
   }
 
   // Word highlight: one overlay for bounding rect
-  const wordStartOffset = sentence.startOffset + word.startOffset;
-  const wordEndOffset = sentence.startOffset + word.endOffset;
+  // word.startOffset / word.endOffset are already absolute offsets within paragraph text
+  const wordStartOffset = word.startOffset;
+  const wordEndOffset = word.endOffset;
   const wordRange = createRangeFromOffsets(para.element, wordStartOffset, wordEndOffset);
   const wordRect = wordRange.getBoundingClientRect();
   if (wordRect.width > 0 && wordRect.height > 0) {

@@ -125,8 +125,9 @@ export function initScrollNav(state, paragraphs) {
     if (!word) return null;
 
     try {
-      const wordStartOffset = sentence.startOffset + word.startOffset;
-      const wordEndOffset = sentence.startOffset + word.endOffset;
+      // word.startOffset / word.endOffset are already absolute offsets within paragraph text
+      const wordStartOffset = word.startOffset;
+      const wordEndOffset = word.endOffset;
       const range = createRangeFromOffsets(para.element, wordStartOffset, wordEndOffset);
       const rect = range.getBoundingClientRect();
       if (rect.width > 0 || rect.height > 0) return rect;

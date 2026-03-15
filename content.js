@@ -66,6 +66,7 @@
   // Actions object bridges UI clicks to TTS + state
   const actions = {
     play(fromParagraph = 0) {
+      if (paragraphs.length === 0) return;
       wordsConsumed = 0;
       state.dispatch({ playback: 'playing' });
       tts.play(paragraphs, fromParagraph, 0, state.get().speed);
@@ -148,9 +149,12 @@
   const { initHighlights } = await import(chrome.runtime.getURL('src/highlight.js'));
   initHighlights(state, paragraphs);
 
-  const { initHoverPlayer } = await import(chrome.runtime.getURL('src/hover-player.js'));
-  initHoverPlayer(shadow, state, paragraphs, actions);
+  // Only initialize hover player and scroll nav when there is content to play
+  if (paragraphs.length > 0) {
+    const { initHoverPlayer } = await import(chrome.runtime.getURL('src/hover-player.js'));
+    initHoverPlayer(shadow, state, paragraphs, actions);
 
-  const { initScrollNav } = await import(chrome.runtime.getURL('src/scroll-nav.js'));
-  initScrollNav(state, paragraphs);
+    const { initScrollNav } = await import(chrome.runtime.getURL('src/scroll-nav.js'));
+    initScrollNav(state, paragraphs);
+  }
 })();
