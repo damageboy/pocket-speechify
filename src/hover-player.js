@@ -1,7 +1,6 @@
 import { hoverPlayIcon } from './icons.js';
 
 export function initHoverPlayer(shadow, state, paragraphs, actions) {
-  // Create a single reusable hover button in the shadow root
   const btn = document.createElement('button');
   btn.className = 'hover-player';
   btn.style.display = 'none';
@@ -51,7 +50,6 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
     btn.classList.remove('fade-out');
   }
 
-  // Use a short delay on paragraph mouseleave so the user can reach the button
   function scheduleHide() {
     if (hideDelayTimer !== null) clearTimeout(hideDelayTimer);
     hideDelayTimer = setTimeout(() => {
@@ -66,9 +64,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 
     el.addEventListener('mouseenter', () => {
       if (hideDelayTimer !== null) { clearTimeout(hideDelayTimer); hideDelayTimer = null; }
-      if (state.get().playback === 'idle') {
-        showAt(el, index);
-      }
+      showAt(el, index);
     });
 
     el.addEventListener('mouseleave', () => {
@@ -89,7 +85,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
     hide();
   });
 
-  // Click handler: play from the hovered paragraph
+  // Click: jump to paragraph — works in any playback state
   btn.addEventListener('click', () => {
     if (currentParagraphIndex >= 0) {
       hideImmediate();
@@ -101,11 +97,4 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
   window.addEventListener('scroll', () => {
     hideImmediate();
   }, { passive: true, capture: true });
-
-  // State subscription: hide when playback leaves idle
-  state.subscribe((current, prev) => {
-    if (prev.playback === 'idle' && current.playback !== 'idle') {
-      hideImmediate();
-    }
-  });
 }
