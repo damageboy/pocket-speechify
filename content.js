@@ -147,4 +147,7 @@
 
   const { initHighlights } = await import(chrome.runtime.getURL('src/highlight.js'));
   initHighlights(state, paragraphs);
+
+  const { initHoverPlayer } = await import(chrome.runtime.getURL('src/hover-player.js'));
+  initHoverPlayer(shadow, state, paragraphs, actions);
 })();
