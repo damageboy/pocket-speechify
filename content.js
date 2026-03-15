@@ -144,4 +144,7 @@
 
   const { initSidePanels } = await import(chrome.runtime.getURL('src/side-panels.js'));
   initSidePanels(shadow, state, actions);
+
+  const { initHighlights } = await import(chrome.runtime.getURL('src/highlight.js'));
+  initHighlights(state, paragraphs);
 })();
