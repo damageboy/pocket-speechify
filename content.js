@@ -66,20 +66,27 @@
   // Actions object bridges UI clicks to TTS + state
   const actions = {
     play(fromParagraph = 0) {
-      if (paragraphs.length === 0) return;
+      console.log(`[PS] play(fromParagraph=${fromParagraph}) — current state:`, state.get().playback);
+      if (paragraphs.length === 0) { console.log('[PS] play: no paragraphs, aborting'); return; }
       wordsConsumed = 0;
       state.dispatch({ playback: 'playing' });
       tts.play(paragraphs, fromParagraph, 0, state.get().speed);
+      console.log('[PS] play: TTS started, state now:', state.get().playback);
     },
     pause() {
+      console.log('[PS] pause() — current state:', state.get().playback);
       state.dispatch({ playback: 'paused' });
       tts.pause();
+      console.log('[PS] pause: TTS paused, state now:', state.get().playback);
     },
     resume() {
+      console.log('[PS] resume() — current state:', state.get().playback);
       state.dispatch({ playback: 'playing' });
       tts.resume();
+      console.log('[PS] resume: TTS resumed, state now:', state.get().playback);
     },
     stop() {
+      console.log('[PS] stop()');
       tts.stop();
       wordsConsumed = 0;
       state.dispatch({
@@ -104,6 +111,7 @@
       tts.stop();
       tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
       state.dispatch({
+        playback: 'playing',
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
@@ -126,6 +134,7 @@
       tts.stop();
       tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
       state.dispatch({
+        playback: 'playing',
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
