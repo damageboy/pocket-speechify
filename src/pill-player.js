@@ -1,0 +1,126 @@
+import { waveformIcon, playIcon } from './icons.js';
+
+function formatDuration(totalSec, elapsedSec) {
+  const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  return { mins: String(mins), secs: String(secs).padStart(2, '0') };
+}
+
+export function initPillPlayer(shadow, state, actions, paragraphs) {
+  const hasContent = paragraphs.length > 0;
+
+  // --- Pill container ---
+  const pill = document.createElement('div');
+  pill.className = 'pill-container';
+
+  // --- Pill main section ---
+  const pillMain = document.createElement('div');
+  pillMain.className = 'pill-main';
+
+  // 1. Summarize button (48x48)
+  const summarizeBtn = document.createElement('button');
+  summarizeBtn.className = 'btn btn-48 btn-standard';
+  summarizeBtn.setAttribute('aria-label', 'Summarize');
+  const waveIcon = waveformIcon();
+  waveIcon.style.width = '20px';
+  waveIcon.style.height = '20px';
+  summarizeBtn.appendChild(waveIcon);
+  pillMain.appendChild(summarizeBtn);
+
+  // 2. Duration display (MM:SS)
+  const durationEl = document.createElement('div');
+  durationEl.className = 'duration';
+  const minsSpan = document.createElement('span');
+  minsSpan.className = 'duration-mins';
+  const sepSpan = document.createElement('span');
+  sepSpan.className = 'duration-separator';
+  sepSpan.textContent = ':';
+  const secsSpan = document.createElement('span');
+  secsSpan.className = 'duration-secs';
+
+  durationEl.appendChild(minsSpan);
+  durationEl.appendChild(sepSpan);
+  durationEl.appendChild(secsSpan);
+  pillMain.appendChild(durationEl);
+
+  // Set initial duration
+  const initState = state.get();
+  const initDur = formatDuration(initState.totalDurationSec, initState.elapsedSec);
+  minsSpan.textContent = initDur.mins;
+  secsSpan.textContent = initDur.secs;
+
+  // 3. Play button (32x32)
+  const playBtn = document.createElement('button');
+  playBtn.className = 'btn btn-32 btn-cta';
+  if (!hasContent) {
+    playBtn.classList.add('btn-disabled');
+  }
+  playBtn.setAttribute('aria-label', 'Play');
+  const playIc = playIcon();
+  playIc.style.width = '14px';
+  playIc.style.height = '14px';
+  playBtn.appendChild(playIc);
+
+  if (hasContent) {
+    playBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      actions.play();
+    });
+  }
+  pillMain.appendChild(playBtn);
+
+  // 4. Divider (28x2)
+  const divider = document.createElement('div');
+  divider.className = 'divider';
+  pillMain.appendChild(divider);
+
+  // 5. Voice selector (32x32)
+  const voiceBtn = document.createElement('button');
+  voiceBtn.className = 'btn btn-32 btn-standard';
+  voiceBtn.setAttribute('aria-label', 'Voice');
+  // Placeholder avatar: 26px circle with accent-blue background and "S" text
+  const voiceCircle = document.createElement('span');
+  voiceCircle.style.cssText = 'width: 26px; height: 26px; border-radius: 50%; background: var(--accent-blue); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; pointer-events: none;';
+  voiceCircle.textContent = 'S';
+  voiceBtn.appendChild(voiceCircle);
+  voiceBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    state.dispatch({ panelOpen: state.get().panelOpen === 'voice' ? null : 'voice' });
+  });
+  pillMain.appendChild(voiceBtn);
+
+  // 6. Speed control (32x32)
+  const speedBtn = document.createElement('button');
+  speedBtn.className = 'btn btn-32 btn-standard';
+  speedBtn.setAttribute('aria-label', 'Speed');
+  const speedText = document.createElement('span');
+  speedText.style.cssText = 'font-size: 11px; font-weight: 700; pointer-events: none;';
+  speedText.textContent = `${initState.speed}x`;
+  speedBtn.appendChild(speedText);
+  speedBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    state.dispatch({ panelOpen: state.get().panelOpen === 'speed' ? null : 'speed' });
+  });
+  pillMain.appendChild(speedBtn);
+
+  pill.appendChild(pillMain);
+
+  // --- Subscribe to state changes ---
+  state.subscribe((current, prev) => {
+    // Update duration display
+    if (current.totalDurationSec !== prev.totalDurationSec || current.elapsedSec !== prev.elapsedSec) {
+      const dur = formatDuration(current.totalDurationSec, current.elapsedSec);
+      minsSpan.textContent = dur.mins;
+      secsSpan.textContent = dur.secs;
+    }
+
+    // Update speed text
+    if (current.speed !== prev.speed) {
+      speedText.textContent = `${current.speed}x`;
+    }
+  });
+
+  // --- Append to shadow root ---
+  shadow.appendChild(pill);
+}

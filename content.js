@@ -52,4 +52,43 @@
       elapsedSec: 0,
     });
   });
+
+  // Actions object bridges UI clicks to TTS + state
+  const actions = {
+    play(fromParagraph = 0) {
+      wordsConsumed = 0;
+      state.dispatch({ playback: 'playing' });
+      tts.play(paragraphs, fromParagraph, 0, state.get().speed);
+    },
+    pause() {
+      state.dispatch({ playback: 'paused' });
+      tts.pause();
+    },
+    resume() {
+      state.dispatch({ playback: 'playing' });
+      tts.resume();
+    },
+    stop() {
+      tts.stop();
+      wordsConsumed = 0;
+      state.dispatch({
+        playback: 'idle',
+        currentParagraphIndex: null,
+        currentSentenceIndex: null,
+        currentWordIndex: null,
+        elapsedSec: 0,
+      });
+    },
+    skipForward() { /* wired in Task 8 */ },
+    skipBack() { /* wired in Task 8 */ },
+    setSpeed(speed) {
+      tts.setSpeed(speed);
+      const tw = paragraphs.reduce((sum, p) =>
+        sum + p.sentences.reduce((s, sent) => s + sent.words.length, 0), 0);
+      state.dispatch({ speed, totalDurationSec: tw / (speed * 4) });
+    },
+  };
+
+  const { initPillPlayer } = await import(chrome.runtime.getURL('src/pill-player.js'));
+  initPillPlayer(shadow, state, actions, paragraphs);
 })();
