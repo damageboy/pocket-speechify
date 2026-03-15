@@ -150,4 +150,7 @@
 
   const { initHoverPlayer } = await import(chrome.runtime.getURL('src/hover-player.js'));
   initHoverPlayer(shadow, state, paragraphs, actions);
+
+  const { initScrollNav } = await import(chrome.runtime.getURL('src/scroll-nav.js'));
+  initScrollNav(state, paragraphs);
 })();
