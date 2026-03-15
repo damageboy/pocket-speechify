@@ -1,0 +1,19 @@
+:host {
+  --bg-primary: #1f1f1f;
+  --bg-hover: #363636;
+  --bg-active: #3d3d3d;
+  --bg-divider: #2e2e2e;
+  --bg-cta: #4759f7;
+  --bg-cta-hover: #4454e3;
+  --bg-cta-active: #3d4ac4;
+  --text-primary: #ffffff;
+  --text-secondary: #9f9f9f;
+  --highlight-sentence-dark: #444766;
+  --highlight-word-dark: #5666f0;
+  --highlight-sentence-light: #e0e3ff;
+  --highlight-word-light: #abb3fe;
+  --highlight-primary: #5666f0;
+  --bg-primary-dark: #121212;
+  --text-tertiary: #7a7a7a;
+  --accent-blue: #5c6ae5;
+}
