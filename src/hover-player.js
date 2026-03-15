@@ -17,13 +17,12 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 
   let currentParagraphIndex = -1;
   let fadeOutTimer = null;
+  let hideDelayTimer = null;
+  let isOverButton = false;
 
   function showAt(element, index) {
-    // Cancel any pending fade-out
-    if (fadeOutTimer !== null) {
-      clearTimeout(fadeOutTimer);
-      fadeOutTimer = null;
-    }
+    if (fadeOutTimer !== null) { clearTimeout(fadeOutTimer); fadeOutTimer = null; }
+    if (hideDelayTimer !== null) { clearTimeout(hideDelayTimer); hideDelayTimer = null; }
 
     currentParagraphIndex = index;
 
@@ -31,16 +30,13 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
     btn.style.left = `${rect.left - 36}px`;
     btn.style.top = `${rect.top}px`;
 
-    // Reset animation by removing fade-out class and forcing reflow
     btn.classList.remove('fade-out');
     btn.style.display = 'flex';
-    // Trigger reflow to restart the fadeIn animation defined in CSS on .hover-player
     void btn.offsetWidth;
   }
 
   function hide() {
     btn.classList.add('fade-out');
-    // After the fadeOut animation completes (0.2s per CSS), actually hide
     fadeOutTimer = setTimeout(() => {
       btn.style.display = 'none';
       btn.classList.remove('fade-out');
@@ -49,34 +45,47 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
   }
 
   function hideImmediate() {
-    if (fadeOutTimer !== null) {
-      clearTimeout(fadeOutTimer);
-      fadeOutTimer = null;
-    }
+    if (fadeOutTimer !== null) { clearTimeout(fadeOutTimer); fadeOutTimer = null; }
+    if (hideDelayTimer !== null) { clearTimeout(hideDelayTimer); hideDelayTimer = null; }
     btn.style.display = 'none';
     btn.classList.remove('fade-out');
   }
 
-  // Attach mouseenter/mouseleave to each paragraph element
+  // Use a short delay on paragraph mouseleave so the user can reach the button
+  function scheduleHide() {
+    if (hideDelayTimer !== null) clearTimeout(hideDelayTimer);
+    hideDelayTimer = setTimeout(() => {
+      hideDelayTimer = null;
+      if (!isOverButton) hide();
+    }, 150);
+  }
+
   paragraphs.forEach((para, index) => {
     const el = para.element;
     if (!el) return;
 
     el.addEventListener('mouseenter', () => {
+      if (hideDelayTimer !== null) { clearTimeout(hideDelayTimer); hideDelayTimer = null; }
       if (state.get().playback === 'idle') {
         showAt(el, index);
       }
     });
 
-    el.addEventListener('mouseleave', (e) => {
-      // Don't hide if moving into the hover button itself
-      if (e.relatedTarget === btn || btn.contains(e.relatedTarget)) return;
-      hide();
+    el.addEventListener('mouseleave', () => {
+      scheduleHide();
     });
   });
 
-  // Keep hover button visible when mouse moves onto it from a paragraph
+  btn.addEventListener('mouseenter', () => {
+    isOverButton = true;
+    if (hideDelayTimer !== null) { clearTimeout(hideDelayTimer); hideDelayTimer = null; }
+    if (fadeOutTimer !== null) { clearTimeout(fadeOutTimer); fadeOutTimer = null; }
+    btn.classList.remove('fade-out');
+    btn.style.display = 'flex';
+  });
+
   btn.addEventListener('mouseleave', () => {
+    isOverButton = false;
     hide();
   });
 

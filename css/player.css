@@ -81,9 +81,6 @@
   color: var(--text-primary);
   user-select: none;
   animation: slideIn 0.08s ease-out both;
-  /* Height transition for hover expand */
-  transition: height 150ms ease-in-out;
-  overflow: hidden;
   box-sizing: border-box;
 }
 
@@ -104,7 +101,7 @@
    ============================================================ */
 
 .pill-bottom {
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: center;
   gap: 4px;
@@ -116,6 +113,7 @@
 
 .pill-container:hover .pill-bottom,
 .pill-container.expanded .pill-bottom {
+  display: flex;
   opacity: 1;
   pointer-events: auto;
 }
@@ -283,7 +281,7 @@
   flex-shrink: 0;
 }
 
-.progress-ring svg {
+.progress-ring > svg {
   position: absolute;
   top: 0;
   left: 0;
