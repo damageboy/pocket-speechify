@@ -19,6 +19,7 @@ function renderIdlePlayButton(hasContent, actions) {
   btn.appendChild(ic);
   if (hasContent) {
     btn.addEventListener('click', (e) => {
+      console.log('[PS pill] idle play button clicked');
       e.stopPropagation();
       actions.play();
     });
@@ -26,11 +27,8 @@ function renderIdlePlayButton(hasContent, actions) {
   return btn;
 }
 
-// Build playing/paused UI: progress ring wrapping toggle button + skip buttons row
-function renderActiveControls(playbackState, percent, actions) {
-  const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 4px;';
-
+// Build the progress ring + toggle button (no skip buttons — those are persistent)
+function renderToggleButton(playbackState, percent, actions) {
   const ring = document.createElement('div');
   ring.className = 'progress-ring';
 
@@ -64,8 +62,11 @@ function renderActiveControls(playbackState, percent, actions) {
   }
 
   ring.appendChild(toggleBtn);
-  wrapper.appendChild(ring);
+  return ring;
+}
 
+// Build skip buttons row (created once, reused)
+function createSkipButtons(actions) {
   const skipRow = document.createElement('div');
   skipRow.className = 'skip-buttons';
 
@@ -95,9 +96,7 @@ function renderActiveControls(playbackState, percent, actions) {
 
   skipRow.appendChild(skipBackBtn);
   skipRow.appendChild(skipFwdBtn);
-  wrapper.appendChild(skipRow);
-
-  return wrapper;
+  return skipRow;
 }
 
 export function initPillPlayer(shadow, state, actions, paragraphs) {
@@ -143,10 +142,21 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   minsSpan.textContent = initDur.mins;
   secsSpan.textContent = initDur.secs;
 
-  // 3. Play area — swaps between idle play button and active (progress ring + skips)
+  // 3. Play area — toggle button swaps; skip buttons are persistent
   const playArea = document.createElement('div');
   playArea.className = 'play-area';
-  playArea.appendChild(renderIdlePlayButton(hasContent, actions));
+  playArea.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 4px;';
+
+  // toggleSlot holds either idle play button or progress-ring+toggle
+  const toggleSlot = document.createElement('div');
+  toggleSlot.appendChild(renderIdlePlayButton(hasContent, actions));
+  playArea.appendChild(toggleSlot);
+
+  // Skip buttons — created once, hidden in idle, shown during playing/paused
+  const skipButtons = createSkipButtons(actions);
+  skipButtons.style.display = 'none';
+  playArea.appendChild(skipButtons);
+
   pillMain.appendChild(playArea);
 
   // 4. Divider (28x2)
@@ -288,19 +298,21 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
       : 0;
 
     if (current.playback !== prev.playback) {
-      // Playback state changed — rebuild play area content
-      while (playArea.firstChild) playArea.removeChild(playArea.firstChild);
+      // Playback state changed — rebuild only the toggle slot
+      while (toggleSlot.firstChild) toggleSlot.removeChild(toggleSlot.firstChild);
       if (current.playback === 'idle') {
-        playArea.appendChild(renderIdlePlayButton(hasContent, actions));
+        toggleSlot.appendChild(renderIdlePlayButton(hasContent, actions));
+        skipButtons.style.display = 'none';
       } else {
-        playArea.appendChild(renderActiveControls(current.playback, percent, actions));
+        toggleSlot.appendChild(renderToggleButton(current.playback, percent, actions));
+        skipButtons.style.display = '';
       }
     } else if (
       (current.playback === 'playing' || current.playback === 'paused') &&
       (current.elapsedSec !== prev.elapsedSec || current.totalDurationSec !== prev.totalDurationSec)
     ) {
       // Progress changed — swap just the circular progress SVG
-      const ring = playArea.querySelector('.progress-ring');
+      const ring = toggleSlot.querySelector('.progress-ring');
       if (ring) {
         const oldSvg = ring.querySelector('svg');
         if (oldSvg) {

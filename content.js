@@ -81,8 +81,16 @@
     },
     resume() {
       console.log('[PS] resume() — current state:', state.get().playback);
+      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } = state.get();
+      // If TTS was stopped (e.g. after skip while paused), restart from current position
+      if (pIdx !== null) {
+        const fromWord = wordsBefore(pIdx, sIdx) - wordsBefore(pIdx);
+        tts.stop();
+        tts.play(paragraphs, pIdx, fromWord, state.get().speed);
+      } else {
+        tts.resume();
+      }
       state.dispatch({ playback: 'playing' });
-      tts.resume();
       console.log('[PS] resume: TTS resumed, state now:', state.get().playback);
     },
     stop() {
@@ -98,7 +106,7 @@
       });
     },
     skipForward() {
-      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } = state.get();
+      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, playback } = state.get();
       if (pIdx === null) return;
       const para = paragraphs[pIdx];
       let newPIdx = pIdx, newSIdx = sIdx + 1;
@@ -109,9 +117,10 @@
       if (newPIdx >= paragraphs.length) return;
       wordsConsumed = wordsBefore(newPIdx, newSIdx);
       tts.stop();
-      tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
+      if (playback === 'playing') {
+        tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
+      }
       state.dispatch({
-        playback: 'playing',
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
@@ -119,7 +128,7 @@
       });
     },
     skipBack() {
-      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = state.get();
+      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx, playback } = state.get();
       if (pIdx === null) return;
       let newPIdx = pIdx, newSIdx = sIdx;
       if (wIdx < 2) {
@@ -132,9 +141,10 @@
       }
       wordsConsumed = wordsBefore(newPIdx, newSIdx);
       tts.stop();
-      tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
+      if (playback === 'playing') {
+        tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
+      }
       state.dispatch({
-        playback: 'playing',
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
