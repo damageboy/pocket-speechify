@@ -25,4 +25,31 @@
   const totalDurationSec = totalWords / (state.get().speed * 4);
   state.dispatch({ totalDurationSec });
   console.log(`[Pocket Speechify] Extracted ${paragraphs.length} paragraphs, ${totalWords} words, ~${Math.round(totalDurationSec)}s`);
+
+  const { MockTTS } = await import(chrome.runtime.getURL('src/mock-tts.js'));
+  const tts = new MockTTS();
+
+  // Wire TTS events to state updates
+  let wordsConsumed = 0;
+  tts.addEventListener('word', (e) => {
+    wordsConsumed++;
+    const { speed } = state.get();
+    state.dispatch({
+      currentParagraphIndex: e.detail.paragraphIndex,
+      currentSentenceIndex: e.detail.sentenceIndex,
+      currentWordIndex: e.detail.wordIndex,
+      elapsedSec: wordsConsumed / (speed * 4),
+    });
+  });
+
+  tts.addEventListener('end', () => {
+    wordsConsumed = 0;
+    state.dispatch({
+      playback: 'idle',
+      currentParagraphIndex: null,
+      currentSentenceIndex: null,
+      currentWordIndex: null,
+      elapsedSec: 0,
+    });
+  });
 })();
