@@ -1,8 +1,41 @@
-import { closeIcon } from './icons.js';
+import { closeIcon, searchIcon } from './icons.js';
+
+// ============================================================
+// MOCK VOICES (fallback when speechSynthesis has no voices)
+// ============================================================
+
+const MOCK_VOICES = [
+  { name: 'Samantha', lang: 'en-US' },
+  { name: 'Daniel', lang: 'en-GB' },
+  { name: 'Thomas', lang: 'fr-FR' },
+  { name: 'Anna', lang: 'de-DE' },
+  { name: 'Kyoko', lang: 'ja-JP' },
+  { name: 'Yuna', lang: 'ko-KR' },
+];
 
 // ============================================================
 // HELPERS
 // ============================================================
+
+function getVoices() {
+  try {
+    const voices = speechSynthesis.getVoices();
+    if (voices && voices.length > 0) {
+      return voices.map(v => ({ name: v.name, lang: v.lang }));
+    }
+  } catch (_) {}
+  return MOCK_VOICES;
+}
+
+function avatarColor(name) {
+  // Derive a consistent hue from the name string
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) & 0xffffffff;
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 55%, 42%)`;
+}
 
 function speedLabel(speed) {
   if (speed < 0.9) return 'Slow';
@@ -154,6 +187,127 @@ function createSpeedPanel(state, actions) {
 }
 
 // ============================================================
+// VOICE PANEL
+// ============================================================
+
+function createVoicePanel(state) {
+  const panel = document.createElement('div');
+  panel.className = 'side-panel voice-panel';
+
+  // --- Header ---
+  const header = document.createElement('div');
+  header.className = 'side-panel-header';
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'panel-title';
+  titleEl.textContent = 'Voices';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'panel-close-btn';
+  closeBtn.setAttribute('aria-label', 'Close');
+  const closeIc = closeIcon();
+  closeIc.style.width = '16px';
+  closeIc.style.height = '16px';
+  closeBtn.appendChild(closeIc);
+  closeBtn.addEventListener('click', () => state.dispatch({ panelOpen: null }));
+
+  header.appendChild(titleEl);
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  // --- Search ---
+  const searchWrapper = document.createElement('div');
+  searchWrapper.className = 'voice-search';
+
+  const searchIc = searchIcon();
+  searchIc.style.width = '16px';
+  searchIc.style.height = '16px';
+  searchWrapper.appendChild(searchIc);
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Search voices...';
+  searchWrapper.appendChild(searchInput);
+  panel.appendChild(searchWrapper);
+
+  // --- Voice list ---
+  const listEl = document.createElement('div');
+  listEl.className = 'voice-list';
+  panel.appendChild(listEl);
+
+  let allVoices = getVoices();
+
+  // Also try to update when voices change (async load on some browsers)
+  try {
+    speechSynthesis.onvoiceschanged = () => {
+      const loaded = speechSynthesis.getVoices();
+      if (loaded && loaded.length > 0) {
+        allVoices = loaded.map(v => ({ name: v.name, lang: v.lang }));
+        renderList(state.get().voiceId, searchInput.value);
+      }
+    };
+  } catch (_) {}
+
+  function renderList(selectedVoiceId, query) {
+    while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+
+    const q = (query || '').toLowerCase();
+    const filtered = q
+      ? allVoices.filter(v => v.name.toLowerCase().includes(q))
+      : allVoices;
+
+    filtered.forEach(voice => {
+      const item = document.createElement('div');
+      item.className = 'voice-item';
+      if (voice.name === selectedVoiceId) item.classList.add('selected');
+
+      const avatar = document.createElement('div');
+      avatar.className = 'voice-avatar';
+      avatar.style.background = avatarColor(voice.name);
+      avatar.textContent = voice.name.charAt(0).toUpperCase();
+
+      const info = document.createElement('div');
+      info.className = 'voice-info';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'voice-name';
+      nameEl.textContent = voice.name;
+
+      const langEl = document.createElement('div');
+      langEl.className = 'voice-lang';
+      langEl.textContent = voice.lang;
+
+      info.appendChild(nameEl);
+      info.appendChild(langEl);
+
+      item.appendChild(avatar);
+      item.appendChild(info);
+
+      item.addEventListener('click', () => {
+        state.dispatch({ voiceId: voice.name, panelOpen: null });
+      });
+
+      listEl.appendChild(item);
+    });
+  }
+
+  // Initial render
+  renderList(state.get().voiceId, '');
+
+  // Search input handler
+  searchInput.addEventListener('input', () => {
+    renderList(state.get().voiceId, searchInput.value);
+  });
+
+  function sync(s) {
+    // Re-render to update selected state if voiceId changed
+    renderList(s.voiceId, searchInput.value);
+  }
+
+  return { panel, sync, resetSearch: () => { searchInput.value = ''; } };
+}
+
+// ============================================================
 // INIT
 // ============================================================
 
@@ -168,22 +322,36 @@ export function initSidePanels(shadow, state, actions) {
   pill.style.overflow = 'visible';
 
   const { panel: speedPanel, sync: syncSpeed } = createSpeedPanel(state, actions);
+  const { panel: voicePanel, sync: syncVoice, resetSearch } = createVoicePanel(state);
 
-  // Speed panel starts hidden
+  // Panels start hidden
   speedPanel.style.display = 'none';
+  voicePanel.style.display = 'none';
+
   pill.appendChild(speedPanel);
+  pill.appendChild(voicePanel);
 
   state.subscribe((current, prev) => {
     if (current.panelOpen !== prev.panelOpen) {
       if (current.panelOpen === 'speed') {
+        voicePanel.style.display = 'none';
         syncSpeed(current);
         speedPanel.style.display = '';
         // Re-trigger animation
         speedPanel.style.animation = 'none';
         speedPanel.offsetHeight; // reflow
         speedPanel.style.animation = '';
+      } else if (current.panelOpen === 'voice') {
+        speedPanel.style.display = 'none';
+        resetSearch();
+        syncVoice(current);
+        voicePanel.style.display = '';
+        voicePanel.style.animation = 'none';
+        voicePanel.offsetHeight; // reflow
+        voicePanel.style.animation = '';
       } else {
         speedPanel.style.display = 'none';
+        voicePanel.style.display = 'none';
       }
     }
 
@@ -191,6 +359,11 @@ export function initSidePanels(shadow, state, actions) {
     if (current.panelOpen === 'speed' &&
         (current.speed !== prev.speed || current.totalDurationSec !== prev.totalDurationSec)) {
       syncSpeed(current);
+    }
+
+    // Keep voice panel in sync while it's open
+    if (current.panelOpen === 'voice' && current.voiceId !== prev.voiceId) {
+      syncVoice(current);
     }
   });
 }
