@@ -94,8 +94,8 @@ async function handleTTSFromContent(msg, tabId) {
     console.log('[SW] Ensuring offscreen document...');
     await ensureOffscreenDocument();
     console.log('[SW] Offscreen ready. Forwarding:', msg.type);
-    // Forward to offscreen doc with source tag so it knows origin
-    chrome.runtime.sendMessage({ ...msg, source: 'service-worker' });
+    // Forward to offscreen doc with source tag + tab ID so it knows origin
+    chrome.runtime.sendMessage({ ...msg, source: 'service-worker', tabId });
     console.log('[SW] Message forwarded to offscreen');
   } catch (err) {
     console.error('[SW] handleTTSFromContent error:', err);

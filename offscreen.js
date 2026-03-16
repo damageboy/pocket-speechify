@@ -14,6 +14,7 @@ let currentGenId = -1;
 let currentSpeed = 1.0;
 let paused = false;
 let currentLoadedVoiceId = null;
+let currentTabId = null;
 
 // --- Audio Queue ---
 // Chunks from the worker go into this queue. A scheduler drains it into AudioContext.
@@ -362,10 +363,11 @@ async function handlePlay(msg) {
   const { genId, text, voiceId, speed, sentenceMeta } = msg;
   logToSW(`[Offscreen] handlePlay: genId=${genId}, text="${text?.substring(0, 50)}", voiceId=${voiceId}`);
 
-  const isNewGeneration = genId > currentGenId;
+  const isNewGeneration = genId > currentGenId || msg.tabId !== currentTabId;
   if (isNewGeneration) {
     cancelGeneration(currentGenId);
   }
+  currentTabId = msg.tabId;
   // Clear pending word events from previous sentence to prevent stale highlights
   clearPendingWordEvents();
 
