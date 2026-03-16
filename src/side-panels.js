@@ -1,31 +1,9 @@
 import { closeIcon, searchIcon } from './icons.js';
-
-// ============================================================
-// MOCK VOICES (fallback when speechSynthesis has no voices)
-// ============================================================
-
-const MOCK_VOICES = [
-  { name: 'Samantha', lang: 'en-US' },
-  { name: 'Daniel', lang: 'en-GB' },
-  { name: 'Thomas', lang: 'fr-FR' },
-  { name: 'Anna', lang: 'de-DE' },
-  { name: 'Kyoko', lang: 'ja-JP' },
-  { name: 'Yuna', lang: 'ko-KR' },
-];
+import { VOICES } from './voices.js';
 
 // ============================================================
 // HELPERS
 // ============================================================
-
-function getVoices() {
-  try {
-    const voices = speechSynthesis.getVoices();
-    if (voices && voices.length > 0) {
-      return voices.map(v => ({ name: v.name, lang: v.lang }));
-    }
-  } catch (_) {}
-  return MOCK_VOICES;
-}
 
 function avatarColor(name) {
   // Derive a consistent hue from the name string
@@ -235,18 +213,7 @@ function createVoicePanel(state) {
   listEl.className = 'voice-list';
   panel.appendChild(listEl);
 
-  let allVoices = getVoices();
-
-  // Also try to update when voices change (async load on some browsers)
-  try {
-    speechSynthesis.onvoiceschanged = () => {
-      const loaded = speechSynthesis.getVoices();
-      if (loaded && loaded.length > 0) {
-        allVoices = loaded.map(v => ({ name: v.name, lang: v.lang }));
-        renderList(state.get().voiceId, searchInput.value);
-      }
-    };
-  } catch (_) {}
+  const allVoices = VOICES;
 
   function renderList(selectedVoiceId, query) {
     while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
@@ -259,12 +226,23 @@ function createVoicePanel(state) {
     filtered.forEach(voice => {
       const item = document.createElement('div');
       item.className = 'voice-item';
-      if (voice.name === selectedVoiceId) item.classList.add('selected');
+      if (voice.id === selectedVoiceId) item.classList.add('selected');
 
       const avatar = document.createElement('div');
       avatar.className = 'voice-avatar';
       avatar.style.background = avatarColor(voice.name);
+      avatar.style.position = 'relative';
       avatar.textContent = voice.name.charAt(0).toUpperCase();
+
+      const cacheStatus = state.get().voiceCache[voice.id] || 'uncached';
+      if (cacheStatus === 'uncached') {
+        const dlIcon = document.createElement('div');
+        dlIcon.className = 'voice-download-indicator';
+        dlIcon.textContent = '↓';
+        avatar.appendChild(dlIcon);
+      } else if (cacheStatus === 'downloading') {
+        avatar.classList.add('downloading');
+      }
 
       const info = document.createElement('div');
       info.className = 'voice-info';
@@ -284,7 +262,7 @@ function createVoicePanel(state) {
       item.appendChild(info);
 
       item.addEventListener('click', () => {
-        state.dispatch({ voiceId: voice.name, panelOpen: null });
+        state.dispatch({ voiceId: voice.id, panelOpen: null });
       });
 
       listEl.appendChild(item);
@@ -300,7 +278,6 @@ function createVoicePanel(state) {
   });
 
   function sync(s) {
-    // Re-render to update selected state if voiceId changed
     renderList(s.voiceId, searchInput.value);
   }
 
@@ -362,7 +339,8 @@ export function initSidePanels(shadow, state, actions) {
     }
 
     // Keep voice panel in sync while it's open
-    if (current.panelOpen === 'voice' && current.voiceId !== prev.voiceId) {
+    if (current.panelOpen === 'voice' &&
+        (current.voiceId !== prev.voiceId || current.voiceCache !== prev.voiceCache)) {
       syncVoice(current);
     }
   });

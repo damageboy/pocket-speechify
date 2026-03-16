@@ -839,3 +839,26 @@
   white-space: nowrap;
   transition: opacity 0.1s ease;
 }
+
+/* ============================================================
+   VOICE CACHE STATUS INDICATORS
+   ============================================================ */
+
+.voice-download-indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  background: var(--bg-divider);
+  border-radius: 50%;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.voice-avatar.downloading {
+  opacity: 0.5;
+}
