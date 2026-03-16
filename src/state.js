@@ -4,11 +4,23 @@ const INITIAL_STATE = {
   currentSentenceIndex: null,
   currentWordIndex: null,
   speed: 1.0,
-  voiceId: null,
+  voiceId: 'alba',
   panelOpen: null,
   pillExpanded: false,
   totalDurationSec: 0,
   elapsedSec: 0,
+  modelCached: false,
+  voiceCache: {
+    alba: 'uncached',
+    marius: 'uncached',
+    javert: 'uncached',
+    jean: 'uncached',
+    fantine: 'uncached',
+    cosette: 'uncached',
+    eponine: 'uncached',
+    azelma: 'uncached',
+  },
+  downloadProgress: null,
 };
 
 export function createState() {
