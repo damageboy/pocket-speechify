@@ -136,6 +136,12 @@ export function bookmarkIcon() {
   );
 }
 
+export function aboutIcon() {
+  return svg('0 0 20 20',
+    path('M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16ZM6.5 10a3.5 3.5 0 1 1 4 3.465v.035a.5.5 0 0 1-1 0v-.5a.5.5 0 0 1 .5-.5 2.5 2.5 0 1 0-2.5-2.5.5.5 0 0 1-1 0ZM10 15.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z', { fill: 'currentColor', 'fill-rule': 'evenodd', 'clip-rule': 'evenodd' })
+  );
+}
+
 export function trashIcon() {
   return svg('0 0 20 20',
     path('M8.5 4h3a1.5 1.5 0 0 0-3 0Zm-1 0a2.5 2.5 0 0 1 5 0h4a.5.5 0 0 1 0 1h-.64l-.88 10.12A2.5 2.5 0 0 1 12.49 17H7.51a2.5 2.5 0 0 1-2.49-2.38L4.14 5H3.5a.5.5 0 0 1 0-1h4Zm-1.9 1-.86 10.07A1.5 1.5 0 0 0 7.24 16h5.52a1.5 1.5 0 0 0 1.5-1.43L15.1 5H5.6ZM8.5 7.5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V8a.5.5 0 0 1 .5-.5Zm3.5.5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0V8Z', { fill: 'currentColor', 'fill-rule': 'evenodd', 'clip-rule': 'evenodd' })

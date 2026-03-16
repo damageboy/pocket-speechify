@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, aboutIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
 import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
@@ -266,15 +266,54 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   libraryBtn.appendChild(libraryIc);
   pillBottom.appendChild(libraryBtn);
 
-  // Settings button (32x32)
-  const settingsBtn = document.createElement('button');
-  settingsBtn.className = 'btn btn-32 btn-standard';
-  settingsBtn.setAttribute('aria-label', 'Settings');
-  const settingsIc = settingsIcon();
-  settingsIc.style.width = '20px';
-  settingsIc.style.height = '20px';
-  settingsBtn.appendChild(settingsIc);
-  pillBottom.appendChild(settingsBtn);
+  // About button (32x32)
+  const aboutBtn = document.createElement('button');
+  aboutBtn.className = 'btn btn-32 btn-standard';
+  aboutBtn.setAttribute('aria-label', 'About');
+  const aboutIc = aboutIcon();
+  aboutIc.style.width = '20px';
+  aboutIc.style.height = '20px';
+  aboutBtn.appendChild(aboutIc);
+  aboutBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    console.log('[Pocket Speechify] About button clicked');
+    // Read version from manifest
+    const manifest = chrome.runtime.getManifest();
+    const version = manifest.version_name || manifest.version;
+    const name = manifest.name;
+
+    // Toggle about panel
+    let aboutPanel = shadow.querySelector('.about-panel');
+    if (aboutPanel) {
+      aboutPanel.remove();
+      return;
+    }
+    aboutPanel = document.createElement('div');
+    aboutPanel.className = 'about-panel';
+    aboutPanel.style.cssText = [
+      'position: absolute',
+      'right: 60px',
+      'bottom: 0',
+      'background: var(--bg-primary)',
+      'border-radius: 12px',
+      'padding: 16px 20px',
+      'box-shadow: var(--panel-shadow), 0px 4px 6px 0px rgba(0,0,0,0.32)',
+      'color: var(--text-primary)',
+      'font-family: system-ui, sans-serif',
+      'font-size: 13px',
+      'white-space: nowrap',
+      'z-index: 10',
+      'animation: panelSlideIn 0.15s ease-out',
+    ].join('; ');
+    aboutPanel.innerHTML = `
+      <div style="font-weight: 700; font-size: 15px; margin-bottom: 4px;">${name}</div>
+      <div style="color: var(--text-secondary);">Version ${version}</div>
+      <div style="color: var(--text-tertiary); font-size: 11px; margin-top: 8px;">pocket-tts WASM &middot; 24kHz</div>
+    `;
+    aboutPanel.addEventListener('click', (ev) => { ev.stopPropagation(); aboutPanel.remove(); });
+    pill.appendChild(aboutPanel);
+  });
+  pillBottom.appendChild(aboutBtn);
 
   // Upgrade to Premium button (32x32)
   const upgradeBtn = document.createElement('button');

@@ -2,9 +2,7 @@
 # Package the extension into a .zip for Chrome Web Store or direct distribution.
 # Usage: ./scripts/package.sh [output-path]
 #
-# The output .zip can be:
-# - Uploaded to Chrome Web Store as-is
-# - Converted to .crx with: npx crx3 pocket-speechify.zip -o pocket-speechify.crx
+# Stamps the version from git tags/commit hash into manifest.json before packaging.
 
 set -euo pipefail
 
@@ -15,13 +13,17 @@ cd "$EXT_DIR"
 # Verify build first
 bash scripts/verify-build.sh
 
-VERSION=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+# Stamp version into manifest
+VERSION=$(bash scripts/stamp-version.sh)
 OUTPUT="${1:-pocket-speechify-${VERSION}.zip}"
 
 echo ""
 echo "=== Packaging extension v${VERSION} ==="
 
-# Create zip excluding dev/build files
+# Remove stale package if it exists
+rm -f "$OUTPUT"
+
+# Create zip with only extension files
 zip -r "$OUTPUT" \
   manifest.json \
   content.js \
