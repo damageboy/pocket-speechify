@@ -1,2 +1,10 @@
 .DS_Store
 screenshots/
+
+# Build output
+*.zip
+*.crx
+
+# Dev tools
+.playwright-mcp/
+trace.json.gz

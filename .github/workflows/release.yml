@@ -1,0 +1,59 @@
+name: Build & Release Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build WASM (if not vendored)
+        run: |
+          if [ ! -f wasm/pocket_tts_bg.wasm ]; then
+            bash scripts/build-wasm.sh
+          else
+            echo "WASM binary already vendored, skipping build"
+          fi
+
+      - name: Verify build
+        run: bash scripts/verify-build.sh
+
+      - name: Package extension
+        run: bash scripts/package.sh
+
+      - name: Extract version
+        id: version
+        run: echo "version=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pocket-speechify-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
