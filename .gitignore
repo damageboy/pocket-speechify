@@ -4,6 +4,7 @@ screenshots/
 # Build output
 *.zip
 *.crx
+key.pem
 
 # Dev tools
 .playwright-mcp/
