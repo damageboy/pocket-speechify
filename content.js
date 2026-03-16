@@ -1,7 +1,4 @@
 (async function initPocketSpeechify() {
-  const WORDS_PER_SEC = 4;
-
-  // Load logger first (also exposes __psSetLogLevel / __psGetLogLevel on window)
   const { log } = await import(chrome.runtime.getURL('src/logger.js'));
 
   if (document.getElementById('pocket-speechify-host')) return;
@@ -22,34 +19,34 @@
   const { createState } = await import(chrome.runtime.getURL('src/state.js'));
   const state = createState();
 
-  // Task 3: Content extraction
   const { extractContent } = await import(chrome.runtime.getURL('src/content-extractor.js'));
   const paragraphs = extractContent();
-  const totalWords = paragraphs.reduce((sum, p) =>
-    sum + p.sentences.reduce((s, sent) => s + sent.words.length, 0), 0);
-  const totalDurationSec = totalWords / (state.get().speed * WORDS_PER_SEC);
-  state.dispatch({ totalDurationSec });
-  log.info(`Extracted ${paragraphs.length} paragraphs, ${totalWords} words, ~${Math.round(totalDurationSec)}s`);
+  log.info(`Extracted ${paragraphs.length} paragraphs`);
 
-  const { MockTTS } = await import(chrome.runtime.getURL('src/mock-tts.js'));
-  const tts = new MockTTS();
+  // totalDurationSec will be estimated by RemoteTTS on play()
+
+  const { RemoteTTS } = await import(chrome.runtime.getURL('src/remote-tts.js'));
+  const tts = new RemoteTTS();
 
   // Wire TTS events to state updates
-  let wordsConsumed = 0;
   tts.addEventListener('word', (e) => {
-    wordsConsumed++;
-    const { speed } = state.get();
     state.dispatch({
       currentParagraphIndex: e.detail.paragraphIndex,
       currentSentenceIndex: e.detail.sentenceIndex,
       currentWordIndex: e.detail.wordIndex,
-      elapsedSec: wordsConsumed / (speed * WORDS_PER_SEC),
     });
+  });
+
+  tts.addEventListener('elapsed', (e) => {
+    state.dispatch({ elapsedSec: e.detail.elapsedSec });
+  });
+
+  tts.addEventListener('duration-estimate', (e) => {
+    state.dispatch({ totalDurationSec: e.detail.totalDurationSec });
   });
 
   tts.addEventListener('end', () => {
     log.debug('TTS end — playback complete');
-    wordsConsumed = 0;
     state.dispatch({
       playback: 'idle',
       currentParagraphIndex: null,
@@ -59,22 +56,36 @@
     });
   });
 
-  // Helper: count total words before a given paragraph+sentence position
-  function wordsBefore(endParaIdx, endSentIdx = 0) {
-    let total = 0;
-    for (let i = 0; i < endParaIdx; i++)
-      total += paragraphs[i].sentences.reduce((s, sent) => s + sent.words.length, 0);
-    for (let i = 0; i < endSentIdx; i++)
-      total += paragraphs[endParaIdx].sentences[i].words.length;
-    return total;
-  }
+  tts.addEventListener('download-progress', (e) => {
+    const { asset, voiceId, percent } = e.detail;
+    state.dispatch({ downloadProgress: { asset, voiceId, percent } });
+    if (asset === 'voice' && voiceId) {
+      const voiceCache = { ...state.get().voiceCache, [voiceId]: 'downloading' };
+      state.dispatch({ voiceCache });
+    }
+  });
 
-  // Actions object bridges UI clicks to TTS + state
+  tts.addEventListener('download-complete', (e) => {
+    const { asset, voiceId } = e.detail;
+    if (asset === 'model') {
+      state.dispatch({ modelCached: true, downloadProgress: null });
+    } else if (asset === 'voice' && voiceId) {
+      const voiceCache = { ...state.get().voiceCache, [voiceId]: 'cached' };
+      state.dispatch({ voiceCache, downloadProgress: null });
+    }
+  });
+
+  // Wire voiceId state changes to RemoteTTS
+  state.subscribe((current, prev) => {
+    if (current.voiceId !== prev.voiceId) {
+      tts.setVoice(current.voiceId);
+    }
+  });
+
   const actions = {
     play(fromParagraph = 0) {
       if (paragraphs.length === 0) { log.warn('play: no paragraphs'); return; }
       log.debug(`play(fromParagraph=${fromParagraph}), speed=${state.get().speed}`);
-      wordsConsumed = 0;
       state.dispatch({ playback: 'playing' });
       tts.play(paragraphs, fromParagraph, 0, state.get().speed);
     },
@@ -85,20 +96,12 @@
     },
     resume() {
       log.debug('resume');
-      const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } = state.get();
-      if (pIdx !== null) {
-        const fromWord = wordsBefore(pIdx, sIdx) - wordsBefore(pIdx);
-        tts.stop();
-        tts.play(paragraphs, pIdx, fromWord, state.get().speed);
-      } else {
-        tts.resume();
-      }
+      tts.resume();
       state.dispatch({ playback: 'playing' });
     },
     stop() {
       log.debug('stop');
       tts.stop();
-      wordsConsumed = 0;
       state.dispatch({
         playback: 'idle',
         currentParagraphIndex: null,
@@ -110,7 +113,7 @@
     skipForward() {
       const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, playback } = state.get();
       if (pIdx === null) return;
-      log.debug(`skipForward from p${pIdx}:s${sIdx}, playback=${playback}`);
+      log.debug(`skipForward from p${pIdx}:s${sIdx}`);
       const para = paragraphs[pIdx];
       let newPIdx = pIdx, newSIdx = sIdx + 1;
       if (newSIdx >= para.sentences.length) {
@@ -118,22 +121,25 @@
         newSIdx = 0;
       }
       if (newPIdx >= paragraphs.length) return;
-      wordsConsumed = wordsBefore(newPIdx, newSIdx);
+      // Compute word offset for target sentence within its paragraph
+      const fromWord = paragraphs[newPIdx].sentences
+        .slice(0, newSIdx)
+        .reduce((sum, s) => sum + s.words.length, 0);
       tts.stop();
-      if (playback === 'playing') {
-        tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
-      }
       state.dispatch({
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
-        elapsedSec: wordsConsumed / (state.get().speed * WORDS_PER_SEC),
       });
+      if (playback === 'playing') {
+        state.dispatch({ playback: 'playing' });
+        tts.play(paragraphs, newPIdx, fromWord, state.get().speed);
+      }
     },
     skipBack() {
       const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx, playback } = state.get();
       if (pIdx === null) return;
-      log.debug(`skipBack from p${pIdx}:s${sIdx}:w${wIdx}, playback=${playback}`);
+      log.debug(`skipBack from p${pIdx}:s${sIdx}:w${wIdx}`);
       let newPIdx = pIdx, newSIdx = sIdx;
       if (wIdx < 2) {
         newSIdx = sIdx - 1;
@@ -143,22 +149,25 @@
           else { newSIdx = paragraphs[newPIdx].sentences.length - 1; }
         }
       }
-      wordsConsumed = wordsBefore(newPIdx, newSIdx);
+      // Compute word offset for target sentence within its paragraph
+      const fromWord = paragraphs[newPIdx].sentences
+        .slice(0, newSIdx)
+        .reduce((sum, s) => sum + s.words.length, 0);
       tts.stop();
-      if (playback === 'playing') {
-        tts.play(paragraphs, newPIdx, wordsConsumed - wordsBefore(newPIdx), state.get().speed);
-      }
       state.dispatch({
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
-        elapsedSec: wordsConsumed / (state.get().speed * WORDS_PER_SEC),
       });
+      if (playback === 'playing') {
+        state.dispatch({ playback: 'playing' });
+        tts.play(paragraphs, newPIdx, fromWord, state.get().speed);
+      }
     },
     setSpeed(speed) {
       log.debug(`setSpeed(${speed})`);
       tts.setSpeed(speed);
-      state.dispatch({ speed, totalDurationSec: totalWords / (speed * WORDS_PER_SEC) });
+      state.dispatch({ speed });
     },
   };
 
@@ -171,7 +180,6 @@
   const { initHighlights } = await import(chrome.runtime.getURL('src/highlight.js'));
   initHighlights(state, paragraphs);
 
-  // Only initialize hover player and scroll nav when there is content to play
   if (paragraphs.length > 0) {
     const { initHoverPlayer } = await import(chrome.runtime.getURL('src/hover-player.js'));
     initHoverPlayer(shadow, state, paragraphs, actions);
