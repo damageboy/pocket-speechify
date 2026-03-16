@@ -20,7 +20,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model", "config.yaml", "assets/voices/*.webp"],
+      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model", "config.yaml", "assets/*"],
       "matches": ["<all_urls>"]
     }
   ]
