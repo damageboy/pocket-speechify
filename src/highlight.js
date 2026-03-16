@@ -1,3 +1,5 @@
+import { createRangeFromOffsets, scrollToCenter } from './dom-utils.js';
+
 function detectTheme() {
   const bg = getComputedStyle(document.body).backgroundColor;
   const match = bg.match(/\d+/g);
@@ -5,29 +7,6 @@ function detectTheme() {
   const [r, g, b] = match.map(Number);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.5 ? 'light' : 'dark';
-}
-
-function createRangeFromOffsets(element, startOffset, endOffset) {
-  const range = document.createRange();
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let charCount = 0;
-  let startSet = false;
-
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    const nodeLen = node.textContent.length;
-
-    if (!startSet && charCount + nodeLen > startOffset) {
-      range.setStart(node, startOffset - charCount);
-      startSet = true;
-    }
-    if (startSet && charCount + nodeLen >= endOffset) {
-      range.setEnd(node, endOffset - charCount);
-      return range;
-    }
-    charCount += nodeLen;
-  }
-  return range;
 }
 
 function clearHighlights() {
@@ -52,41 +31,61 @@ function createOverlay(rect, color, opacity) {
   return div;
 }
 
-function updateHighlights(currentState, paragraphs, theme) {
-  clearHighlights();
+let lastSentenceKey = null;
+let sentenceOverlays = [];
 
+function updateHighlights(currentState, paragraphs, theme) {
   const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = currentState;
 
-  if (pIdx === null || sIdx === null || wIdx === null) return;
+  if (pIdx === null || sIdx === null || wIdx === null) {
+    clearHighlights();
+    lastSentenceKey = null;
+    sentenceOverlays = [];
+    return;
+  }
 
   const para = paragraphs[pIdx];
-  if (!para) return;
+  if (!para) { clearHighlights(); lastSentenceKey = null; sentenceOverlays = []; return; }
 
   const sentence = para.sentences[sIdx];
-  if (!sentence) return;
+  if (!sentence) { clearHighlights(); lastSentenceKey = null; sentenceOverlays = []; return; }
 
   const word = sentence.words[wIdx];
-  if (!word) return;
+  if (!word) { clearHighlights(); lastSentenceKey = null; sentenceOverlays = []; return; }
 
   const sentenceColor = theme === 'dark' ? '#444766' : '#e0e3ff';
   const wordColor = theme === 'dark' ? '#5666f0' : '#abb3fe';
 
-  // Sentence highlight: one overlay per client rect
-  const sentenceStartOffset = sentence.startOffset;
-  const sentenceEndOffset = sentenceStartOffset + sentence.text.length;
-  const sentenceRange = createRangeFromOffsets(para.element, sentenceStartOffset, sentenceEndOffset);
-  const sentenceRects = sentenceRange.getClientRects();
-  for (const rect of sentenceRects) {
-    if (rect.width > 0 && rect.height > 0) {
-      document.body.appendChild(createOverlay(rect, sentenceColor, 0.6));
+  const sentenceKey = `${pIdx}:${sIdx}`;
+  const sentenceChanged = sentenceKey !== lastSentenceKey;
+
+  if (sentenceChanged) {
+    // Remove old word overlays and old sentence overlays
+    clearHighlights();
+    sentenceOverlays = [];
+
+    // Sentence highlight: one overlay per client rect
+    const sentenceStartOffset = sentence.startOffset;
+    const sentenceEndOffset = sentenceStartOffset + sentence.text.length;
+    const sentenceRange = createRangeFromOffsets(para.element, sentenceStartOffset, sentenceEndOffset);
+    const sentenceRects = sentenceRange.getClientRects();
+    for (const rect of sentenceRects) {
+      if (rect.width > 0 && rect.height > 0) {
+        const overlay = createOverlay(rect, sentenceColor, 0.6);
+        document.body.appendChild(overlay);
+        sentenceOverlays.push(overlay);
+      }
     }
+    lastSentenceKey = sentenceKey;
+  } else {
+    // Remove only word overlays (those not in sentenceOverlays)
+    document.querySelectorAll('[data-ps-highlight="true"]').forEach(el => {
+      if (!sentenceOverlays.includes(el)) el.remove();
+    });
   }
 
   // Word highlight: one overlay for bounding rect
-  // word.startOffset / word.endOffset are already absolute offsets within paragraph text
-  const wordStartOffset = word.startOffset;
-  const wordEndOffset = word.endOffset;
-  const wordRange = createRangeFromOffsets(para.element, wordStartOffset, wordEndOffset);
+  const wordRange = createRangeFromOffsets(para.element, word.startOffset, word.endOffset);
   const wordRect = wordRange.getBoundingClientRect();
   if (wordRect.width > 0 && wordRect.height > 0) {
     document.body.appendChild(createOverlay(wordRect, wordColor, 0.6));
@@ -94,8 +93,7 @@ function updateHighlights(currentState, paragraphs, theme) {
     // Auto-scroll: if word is more than 100px outside viewport, smooth-scroll to center it
     const viewportHeight = window.innerHeight;
     if (wordRect.top < -100 || wordRect.bottom > viewportHeight + 100) {
-      const absoluteTop = wordRect.top + window.scrollY;
-      window.scrollTo({ top: absoluteTop - viewportHeight / 2, behavior: 'smooth' });
+      scrollToCenter(wordRect);
     }
   }
 }
@@ -106,6 +104,8 @@ export function initHighlights(state, paragraphs) {
   state.subscribe((current, prev) => {
     if (current.playback === 'idle' && prev.playback !== 'idle') {
       clearHighlights();
+      lastSentenceKey = null;
+      sentenceOverlays = [];
       return;
     }
     if (current.playback === 'playing' || current.playback === 'paused') {

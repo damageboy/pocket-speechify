@@ -21,7 +21,11 @@ export function createState() {
 
   function dispatch(patch) {
     const prev = state;
-    state = { ...state, ...patch };
+    const next = { ...state, ...patch };
+    // Skip if nothing changed
+    const changed = Object.keys(patch).some(k => next[k] !== prev[k]);
+    if (!changed) return;
+    state = next;
     bus.dispatchEvent(new CustomEvent('statechange', {
       detail: { current: { ...state }, prev }
     }));

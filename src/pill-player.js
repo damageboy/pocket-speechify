@@ -19,7 +19,6 @@ function renderIdlePlayButton(hasContent, actions) {
   btn.appendChild(ic);
   if (hasContent) {
     btn.addEventListener('click', (e) => {
-      console.log('[PS pill] idle play button clicked');
       e.stopPropagation();
       actions.play();
     });
@@ -311,14 +310,14 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
       (current.playback === 'playing' || current.playback === 'paused') &&
       (current.elapsedSec !== prev.elapsedSec || current.totalDurationSec !== prev.totalDurationSec)
     ) {
-      // Progress changed — swap just the circular progress SVG
+      // Progress changed — update only the arc's stroke-dashoffset, no new elements
       const ring = toggleSlot.querySelector('.progress-ring');
       if (ring) {
-        const oldSvg = ring.querySelector('svg');
-        if (oldSvg) {
-          const newSvg = circularProgress(percent);
-          newSvg.style.cssText = 'width: 100%; height: 100%;';
-          ring.replaceChild(newSvg, oldSvg);
+        const arc = ring.querySelector('svg path:last-of-type');
+        if (arc) {
+          const circumference = 2 * Math.PI * 46;
+          const offset = circumference - (percent / 100) * circumference;
+          arc.setAttribute('stroke-dashoffset', `${offset}`);
         }
       }
     }

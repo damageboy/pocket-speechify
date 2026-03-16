@@ -1,4 +1,6 @@
 (async function initPocketSpeechify() {
+  const WORDS_PER_SEC = 4;
+
   if (document.getElementById('pocket-speechify-host')) return;
 
   const host = document.createElement('div');
@@ -22,9 +24,8 @@
   const paragraphs = extractContent();
   const totalWords = paragraphs.reduce((sum, p) =>
     sum + p.sentences.reduce((s, sent) => s + sent.words.length, 0), 0);
-  const totalDurationSec = totalWords / (state.get().speed * 4);
+  const totalDurationSec = totalWords / (state.get().speed * WORDS_PER_SEC);
   state.dispatch({ totalDurationSec });
-  console.log(`[Pocket Speechify] Extracted ${paragraphs.length} paragraphs, ${totalWords} words, ~${Math.round(totalDurationSec)}s`);
 
   const { MockTTS } = await import(chrome.runtime.getURL('src/mock-tts.js'));
   const tts = new MockTTS();
@@ -38,7 +39,7 @@
       currentParagraphIndex: e.detail.paragraphIndex,
       currentSentenceIndex: e.detail.sentenceIndex,
       currentWordIndex: e.detail.wordIndex,
-      elapsedSec: wordsConsumed / (speed * 4),
+      elapsedSec: wordsConsumed / (speed * WORDS_PER_SEC),
     });
   });
 
@@ -66,21 +67,16 @@
   // Actions object bridges UI clicks to TTS + state
   const actions = {
     play(fromParagraph = 0) {
-      console.log(`[PS] play(fromParagraph=${fromParagraph}) — current state:`, state.get().playback);
-      if (paragraphs.length === 0) { console.log('[PS] play: no paragraphs, aborting'); return; }
+      if (paragraphs.length === 0) return;
       wordsConsumed = 0;
       state.dispatch({ playback: 'playing' });
       tts.play(paragraphs, fromParagraph, 0, state.get().speed);
-      console.log('[PS] play: TTS started, state now:', state.get().playback);
     },
     pause() {
-      console.log('[PS] pause() — current state:', state.get().playback);
       state.dispatch({ playback: 'paused' });
       tts.pause();
-      console.log('[PS] pause: TTS paused, state now:', state.get().playback);
     },
     resume() {
-      console.log('[PS] resume() — current state:', state.get().playback);
       const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } = state.get();
       // If TTS was stopped (e.g. after skip while paused), restart from current position
       if (pIdx !== null) {
@@ -91,10 +87,8 @@
         tts.resume();
       }
       state.dispatch({ playback: 'playing' });
-      console.log('[PS] resume: TTS resumed, state now:', state.get().playback);
     },
     stop() {
-      console.log('[PS] stop()');
       tts.stop();
       wordsConsumed = 0;
       state.dispatch({
@@ -124,7 +118,7 @@
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
-        elapsedSec: wordsConsumed / (state.get().speed * 4),
+        elapsedSec: wordsConsumed / (state.get().speed * WORDS_PER_SEC),
       });
     },
     skipBack() {
@@ -148,14 +142,12 @@
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
         currentWordIndex: 0,
-        elapsedSec: wordsConsumed / (state.get().speed * 4),
+        elapsedSec: wordsConsumed / (state.get().speed * WORDS_PER_SEC),
       });
     },
     setSpeed(speed) {
       tts.setSpeed(speed);
-      const tw = paragraphs.reduce((sum, p) =>
-        sum + p.sentences.reduce((s, sent) => s + sent.words.length, 0), 0);
-      state.dispatch({ speed, totalDurationSec: tw / (speed * 4) });
+      state.dispatch({ speed, totalDurationSec: totalWords / (speed * WORDS_PER_SEC) });
     },
   };
 

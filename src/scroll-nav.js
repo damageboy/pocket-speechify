@@ -1,47 +1,12 @@
+import { createRangeFromOffsets, scrollToCenter } from './dom-utils.js';
+import { chevronIcon } from './icons.js';
+
 function throttle(fn, ms) {
   let last = 0;
   return (...args) => {
     const now = Date.now();
     if (now - last >= ms) { last = now; fn(...args); }
   };
-}
-
-function createRangeFromOffsets(element, startOffset, endOffset) {
-  const range = document.createRange();
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let charCount = 0;
-  let startSet = false;
-
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    const nodeLen = node.textContent.length;
-
-    if (!startSet && charCount + nodeLen > startOffset) {
-      range.setStart(node, startOffset - charCount);
-      startSet = true;
-    }
-    if (startSet && charCount + nodeLen >= endOffset) {
-      range.setEnd(node, endOffset - charCount);
-      return range;
-    }
-    charCount += nodeLen;
-  }
-  return range;
-}
-
-function makeChevronSVG() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '17');
-  svg.setAttribute('height', '17');
-  svg.setAttribute('viewBox', '0 0 17 17');
-  svg.setAttribute('fill', 'none');
-
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', 'M12.7803 6.96967C13.0732 7.26256 13.0732 7.73744 12.7803 8.03033L8.78033 12.0303C8.63968 12.171 8.44891 12.25 8.25 12.25C8.05109 12.25 7.86032 12.171 7.71967 12.0303L3.71967 8.03033C3.42678 7.73744 3.42678 7.26256 3.71967 6.96967C4.01256 6.67678 4.48744 6.67678 4.78033 6.96967L8.25 10.4393L11.7197 6.96967C12.0126 6.67678 12.4874 6.67678 12.7803 6.96967Z');
-  path.setAttribute('fill', 'white');
-  svg.appendChild(path);
-
-  return svg;
 }
 
 function createPill(isTop) {
@@ -75,7 +40,7 @@ function createPill(isTop) {
     'justify-content: center',
     isTop ? 'transform: rotate(180deg)' : '',
   ].filter(Boolean).join('; ');
-  chevronWrapper.appendChild(makeChevronSVG());
+  chevronWrapper.appendChild(chevronIcon());
 
   const wordBadge = document.createElement('div');
   wordBadge.className = 'scroll-nav-word';
@@ -192,8 +157,7 @@ export function initScrollNav(state, paragraphs) {
     const rect = getHighlightRect();
     if (!rect) return;
 
-    const absoluteTop = rect.top + window.scrollY;
-    window.scrollTo({ top: absoluteTop - window.innerHeight / 2, behavior: 'smooth' });
+    scrollToCenter(rect);
     hidePill(topPill);
     hidePill(bottomPill);
   }
