@@ -866,3 +866,118 @@
 .voice-avatar.downloading {
   opacity: 0.5;
 }
+
+/* ============================================================
+   SETTINGS DIALOG (full two-pane modal)
+   ============================================================ */
+
+.settings-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 640px;
+  height: 460px;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+  display: flex;
+  overflow: hidden;
+  z-index: 2147483647;
+  font-family: system-ui, sans-serif;
+  color: var(--text-primary);
+  animation: fadeIn 0.1s ease-out both;
+}
+
+.settings-nav {
+  width: 176px;
+  flex-shrink: 0;
+  background: var(--bg-primary-dark);
+  padding: 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--bg-divider);
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  transition: background 0.1s ease, color 0.1s ease;
+  font-family: system-ui, sans-serif;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-nav-item.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-nav-icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.settings-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 28px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.settings-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+.settings-content-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.settings-dialog-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0;
+  transition: background 0.1s ease, color 0.1s ease;
+  flex-shrink: 0;
+}
+
+.settings-dialog-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-content-body {
+  flex: 1;
+}

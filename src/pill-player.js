@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, closeIcon, settingsIcon, turnOffIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon } from './icons.js';
 import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
@@ -304,90 +304,83 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   settingsBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     console.log('[Pocket Speechify] Settings button clicked');
-    let settingsPanel = shadow.querySelector('.settings-panel');
-    if (settingsPanel) {
-      settingsPanel.remove();
-      return;
+    const existing = shadow.querySelector('.settings-dialog');
+    if (existing) { existing.remove(); return; }
+
+    const sections = [
+      { key: 'General',             icon: navGeneralIcon },
+      { key: 'Play Buttons',        icon: navPlayButtonsIcon },
+      { key: 'Keyboard Shortcuts',  icon: navKeyboardIcon },
+      { key: 'Accessibility',       icon: navAccessibilityIcon },
+      { key: 'Debug',               icon: navDebugIcon },
+    ];
+    let active = 'General';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'settings-dialog';
+
+    // Left nav
+    const nav = document.createElement('nav');
+    nav.className = 'settings-nav';
+
+    // Right content pane
+    const contentPane = document.createElement('div');
+    contentPane.className = 'settings-content';
+
+    const contentHeader = document.createElement('div');
+    contentHeader.className = 'settings-content-header';
+
+    const contentTitle = document.createElement('div');
+    contentTitle.className = 'settings-content-title';
+    contentTitle.textContent = active;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'settings-dialog-close';
+    const closeIcEl = closeIcon();
+    closeIcEl.style.cssText = 'width: 14px; height: 14px;';
+    closeBtn.appendChild(closeIcEl);
+    closeBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      console.log('[Pocket Speechify] Settings dialog close clicked');
+      dialog.remove();
+    });
+
+    contentHeader.appendChild(contentTitle);
+    contentHeader.appendChild(closeBtn);
+    contentPane.appendChild(contentHeader);
+
+    const contentBody = document.createElement('div');
+    contentBody.className = 'settings-content-body';
+    contentPane.appendChild(contentBody);
+
+    function renderNav() {
+      nav.innerHTML = '';
+      sections.forEach(({ key, icon }) => {
+        const item = document.createElement('button');
+        item.className = 'settings-nav-item' + (key === active ? ' active' : '');
+        const iconEl = icon();
+        iconEl.classList.add('settings-nav-icon');
+        item.appendChild(iconEl);
+        const label = document.createElement('span');
+        label.textContent = key;
+        item.appendChild(label);
+        item.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          console.log(`[Pocket Speechify] Settings section: ${key}`);
+          active = key;
+          contentTitle.textContent = key;
+          renderNav();
+        });
+        nav.appendChild(item);
+      });
     }
-    settingsPanel = document.createElement('div');
-    settingsPanel.className = 'settings-panel';
-    settingsPanel.style.cssText = [
-      'position: absolute',
-      'right: 60px',
-      'bottom: 0',
-      'width: 260px',
-      'background: var(--bg-primary)',
-      'border-radius: 12px',
-      'padding: 16px',
-      'box-shadow: var(--panel-shadow), 0px 4px 6px 0px rgba(0,0,0,0.32)',
-      'color: var(--text-primary)',
-      'font-family: system-ui, sans-serif',
-      'font-size: 13px',
-      'z-index: 10',
-      'animation: fadeIn 0.1s ease-out both',
-      'box-sizing: border-box',
-    ].join('; ');
 
-    // Header
-    const header = document.createElement('div');
-    header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;';
-    const title = document.createElement('span');
-    title.style.cssText = 'font-weight: 700; font-size: 15px;';
-    title.textContent = 'Settings';
-    const closePanelBtn = document.createElement('button');
-    closePanelBtn.style.cssText = [
-      'width: 20px', 'height: 20px', 'display: flex', 'align-items: center',
-      'justify-content: center', 'border: none', 'background: transparent',
-      'color: var(--text-primary)', 'cursor: pointer', 'border-radius: 50%',
-      'padding: 0', 'opacity: 1', 'transition: opacity 0.1s ease', 'flex-shrink: 0',
-    ].join('; ');
-    closePanelBtn.addEventListener('mouseenter', () => { closePanelBtn.style.opacity = '0.75'; });
-    closePanelBtn.addEventListener('mouseleave', () => { closePanelBtn.style.opacity = '1'; });
-    const closeIc = closeIcon();
-    closeIc.style.cssText = 'width: 12px; height: 12px;';
-    closePanelBtn.appendChild(closeIc);
-    closePanelBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      console.log('[Pocket Speechify] Settings panel close clicked');
-      settingsPanel.remove();
-    });
-    header.appendChild(title);
-    header.appendChild(closePanelBtn);
-    settingsPanel.appendChild(header);
-
-    // Divider
-    const divEl = document.createElement('div');
-    divEl.style.cssText = 'height: 1px; background: var(--bg-divider); margin-bottom: 16px;';
-    settingsPanel.appendChild(divEl);
-
-    // Empty content area (placeholder for future settings)
-    const content = document.createElement('div');
-    content.style.cssText = 'height: 32px;';
-    settingsPanel.appendChild(content);
-
-    // Footer with Save button
-    const footer = document.createElement('div');
-    footer.style.cssText = 'padding-top: 12px; border-top: 1px solid var(--bg-divider);';
-    const saveBtn = document.createElement('button');
-    saveBtn.style.cssText = [
-      'width: 100%', 'height: 36px', 'border-radius: 8px', 'border: none',
-      'background: var(--bg-cta)', 'color: var(--text-primary)',
-      'font-family: system-ui, sans-serif', 'font-size: 14px',
-      'font-weight: 600', 'cursor: pointer', 'transition: background 0.1s ease',
-    ].join('; ');
-    saveBtn.textContent = 'Save Settings';
-    saveBtn.addEventListener('mouseenter', () => { saveBtn.style.background = 'var(--bg-cta-hover)'; });
-    saveBtn.addEventListener('mouseleave', () => { saveBtn.style.background = 'var(--bg-cta)'; });
-    saveBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      console.log('[Pocket Speechify] Save Settings clicked');
-      settingsPanel.remove();
-    });
-    footer.appendChild(saveBtn);
-    settingsPanel.appendChild(footer);
-
-    settingsPanel.addEventListener('click', (ev) => ev.stopPropagation());
-    pill.appendChild(settingsPanel);
+    renderNav();
+    dialog.appendChild(nav);
+    dialog.appendChild(contentPane);
+    dialog.addEventListener('click', (ev) => ev.stopPropagation());
+    // Append to shadow root (not pill) — avoids pill's scale(1.5) transform
+    shadow.appendChild(dialog);
   });
   pillBottom.appendChild(settingsBtn);
   pillBottom.appendChild(aboutBtn);

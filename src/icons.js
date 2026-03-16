@@ -179,3 +179,42 @@ export function turnOffIcon() {
     path('M12.3884 6.38837C12.6813 6.09548 13.1562 6.09548 13.4491 6.38837C13.742 6.68127 13.742 7.15614 13.4491 7.44903L10.9794 9.91867L13.4491 12.3884C13.742 12.6813 13.742 13.1561 13.4491 13.449C13.1563 13.7419 12.6814 13.7419 12.3885 13.449L9.91876 10.9793L7.44903 13.449C7.15613 13.7419 6.68126 13.7419 6.38837 13.449C6.09548 13.1561 6.09548 12.6813 6.38837 12.3884L8.85809 9.91867L6.38843 7.44903C6.09553 7.15614 6.09553 6.68127 6.38842 6.38837C6.68132 6.09548 7.15619 6.09548 7.44908 6.38837L9.91876 8.85802L12.3884 6.38837Z', { fill: '#9f9f9f', 'fill-rule': 'evenodd', 'clip-rule': 'evenodd' })
   );
 }
+
+/* ---- Settings nav icons ---- */
+
+export function navGeneralIcon() {
+  return svg('0 0 20 20',
+    path('M3 6.5h14', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' }),
+    circle(13.5, 6.5, 2, { fill: 'currentColor' }),
+    path('M3 13.5h14', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' }),
+    circle(6.5, 13.5, 2, { fill: 'currentColor' })
+  );
+}
+
+export function navPlayButtonsIcon() {
+  return svg('0 0 20 20',
+    circle(10, 10, 7.5, { stroke: 'currentColor', 'stroke-width': '1.5', fill: 'none' }),
+    path('M8.5 7.5L13.5 10L8.5 12.5Z', { fill: 'currentColor' })
+  );
+}
+
+export function navKeyboardIcon() {
+  return svg('0 0 20 20',
+    path('M3 7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z', { stroke: 'currentColor', 'stroke-width': '1.5', fill: 'none' }),
+    path('M6 10.5h1M9.5 10.5h1M13 10.5h1M6.5 13h7', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' })
+  );
+}
+
+export function navAccessibilityIcon() {
+  return svg('0 0 20 20',
+    circle(10, 4.5, 1.75, { fill: 'currentColor' }),
+    path('M10 7.5v4.5M7 9.5l3 1 3-1M7.5 17l2.5-4.5 2.5 4.5', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: 'none' })
+  );
+}
+
+export function navDebugIcon() {
+  return svg('0 0 20 20',
+    path('M4.5 7L9 10 4.5 13', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: 'none' }),
+    path('M11 13h4.5', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' })
+  );
+}
