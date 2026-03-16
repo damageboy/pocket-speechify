@@ -77,6 +77,8 @@
   padding: 12px 0 8px;
   gap: 4px;
   z-index: 2147483645;
+  transform: scale(1.5);
+  transform-origin: right center;
   cursor: move;
   font-family: system-ui, sans-serif;
   color: var(--text-primary);
