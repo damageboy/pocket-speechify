@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
 
 function formatDuration(totalSec, elapsedSec) {
   const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
@@ -199,15 +199,33 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   pillBottom.className = 'pill-bottom';
   pillBottom.style.marginTop = '8px';
 
-  // Save to Library button (32x32)
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'btn btn-32 btn-standard';
-  saveBtn.setAttribute('aria-label', 'Save to Library');
-  const saveIc = bookmarkIcon();
-  saveIc.style.width = '20px';
-  saveIc.style.height = '20px';
-  saveBtn.appendChild(saveIc);
-  pillBottom.appendChild(saveBtn);
+  // Clear Cache button (32x32)
+  const clearCacheBtn = document.createElement('button');
+  clearCacheBtn.className = 'btn btn-32 btn-standard';
+  clearCacheBtn.setAttribute('aria-label', 'Clear TTS Cache');
+  const trashIc = trashIcon();
+  trashIc.style.width = '20px';
+  trashIc.style.height = '20px';
+  clearCacheBtn.appendChild(trashIc);
+  clearCacheBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    console.log('[Pocket Speechify] Clear Cache button clicked');
+    // Cache lives in the extension origin (offscreen doc), not the page origin.
+    // Route through the service worker → offscreen document.
+    chrome.runtime.sendMessage({ type: 'tts-clear-cache', source: 'content' });
+    state.dispatch({
+      modelCached: false,
+      voiceCache: {
+        alba: 'uncached', marius: 'uncached', javert: 'uncached', jean: 'uncached',
+        fantine: 'uncached', cosette: 'uncached', eponine: 'uncached', azelma: 'uncached',
+      },
+      downloadProgress: null,
+    });
+    // Flash the button to confirm
+    clearCacheBtn.style.background = 'var(--bg-cta)';
+    setTimeout(() => { clearCacheBtn.style.background = ''; }, 500);
+  });
+  pillBottom.appendChild(clearCacheBtn);
 
   // Report a Problem button (32x32)
   const reportBtn = document.createElement('button');
@@ -285,6 +303,38 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
       const dur = formatDuration(current.totalDurationSec, current.elapsedSec);
       minsSpan.textContent = dur.mins;
       secsSpan.textContent = dur.secs;
+    }
+
+    // Show download progress as circular ring around play button
+    if (current.downloadProgress !== prev.downloadProgress) {
+      while (toggleSlot.firstChild) toggleSlot.removeChild(toggleSlot.firstChild);
+      if (current.downloadProgress && current.downloadProgress.percent >= 0) {
+        const dlPercent = current.downloadProgress.percent;
+        toggleSlot.appendChild(renderToggleButton('paused', dlPercent, actions));
+        // Replace the inner icon with percentage text
+        const innerBtn = toggleSlot.querySelector('.btn-cta');
+        if (innerBtn) {
+          while (innerBtn.firstChild) innerBtn.removeChild(innerBtn.firstChild);
+          const pctText = document.createElement('span');
+          pctText.style.cssText = 'font-size: 9px; font-weight: 700; pointer-events: none;';
+          pctText.textContent = `${dlPercent}%`;
+          innerBtn.appendChild(pctText);
+          innerBtn.setAttribute('aria-label', `Downloading ${current.downloadProgress.asset}: ${dlPercent}%`);
+          innerBtn.style.pointerEvents = 'none';
+        }
+        skipButtons.style.display = 'none';
+      } else if (!current.downloadProgress) {
+        // Download done — restore correct play state
+        if (current.playback === 'idle') {
+          toggleSlot.appendChild(renderIdlePlayButton(hasContent, actions));
+          skipButtons.style.display = 'none';
+        } else {
+          const pct = current.totalDurationSec > 0
+            ? (current.elapsedSec / current.totalDurationSec) * 100 : 0;
+          toggleSlot.appendChild(renderToggleButton(current.playback, pct, actions));
+          skipButtons.style.display = '';
+        }
+      }
     }
 
     // Update speed text

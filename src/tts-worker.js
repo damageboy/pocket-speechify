@@ -1,134 +1,25 @@
 // src/tts-worker.js
 //
 // WASM TTS worker — loads pocket-tts model and runs streaming inference.
+// Based on babybirdprd/pocket-tts wasm-tts.worker.ts calling conventions.
+//
 // API: WasmTTSModel (load_from_buffer, load_voice_from_safetensors, start_stream)
-//      WasmTTSStream (next_chunk)
+//      WasmTTSStream (next_chunk_min_samples, last_chunk_stats)
 
+let bindings = null; // cached WASM module
 let model = null;
-let loadedVoices = new Map(); // voiceId → index
+let sampleRate = 24000;
 let cancelledGenId = -1;
-let wasmInitialized = false;
+let activeStreamToken = 0;
+let stopRequested = false;
 
-// --- SentencePiece Unigram Tokenizer ---
-// Vendored from LaurentMazare/xn's worker.js implementation.
-// Parses .model protobuf and runs Viterbi decoding.
-// Kept as a reference/fallback — babybirdprd's WASM API handles
-// tokenization internally via start_stream(text).
-
-let tokenizer = null;
-
-class UnigramTokenizer {
-  constructor(pieces) {
-    this.pieces = pieces;
-    this.pieceMap = new Map();
-    for (let i = 0; i < pieces.length; i++) {
-      this.pieceMap.set(pieces[i].piece, { index: i, score: pieces[i].score });
-    }
-  }
-
-  encode(text) {
-    const n = text.length;
-    const best = new Array(n + 1).fill(null);
-    best[0] = { score: 0, tokens: [] };
-
-    for (let i = 0; i < n; i++) {
-      if (best[i] === null) continue;
-      for (let len = 1; len <= n - i && len <= 64; len++) {
-        const substr = text.substring(i, i + len);
-        const piece = this.pieceMap.get(substr);
-        if (!piece) continue;
-        const newScore = best[i].score + piece.score;
-        if (best[i + len] === null || newScore > best[i + len].score) {
-          best[i + len] = {
-            score: newScore,
-            tokens: [...best[i].tokens, piece.index],
-          };
-        }
-      }
-      // Unknown character fallback
-      if (best[i + 1] === null) {
-        best[i + 1] = {
-          score: best[i].score - 100,
-          tokens: [...best[i].tokens, 0],
-        };
-      }
-    }
-
-    return best[n] ? new Uint32Array(best[n].tokens) : new Uint32Array([]);
-  }
-
-  static async fromModelFile(buffer) {
-    const bytes = new Uint8Array(buffer);
-    const pieces = [];
-    let pos = 0;
-
-    while (pos < bytes.length) {
-      const [fieldNum, wireType, newPos1] = readTag(bytes, pos);
-      pos = newPos1;
-      if (fieldNum === 1 && wireType === 2) {
-        const [len, newPos2] = readVarint(bytes, pos);
-        pos = newPos2;
-        const pieceBytes = bytes.subarray(pos, pos + len);
-        pos += len;
-        const piece = parseSentencePiece(pieceBytes);
-        pieces.push(piece);
-      } else {
-        pos = skipField(bytes, pos, wireType);
-      }
-    }
-
-    return new UnigramTokenizer(pieces);
-  }
+function diag(m) {
+  console.log(m);
+  self.postMessage({ type: 'diag', message: m });
 }
 
-function readVarint(bytes, pos) {
-  let result = 0;
-  let shift = 0;
-  while (pos < bytes.length) {
-    const b = bytes[pos++];
-    result |= (b & 0x7f) << shift;
-    if ((b & 0x80) === 0) break;
-    shift += 7;
-  }
-  return [result, pos];
-}
-
-function readTag(bytes, pos) {
-  const [tag, newPos] = readVarint(bytes, pos);
-  return [tag >>> 3, tag & 0x07, newPos];
-}
-
-function skipField(bytes, pos, wireType) {
-  switch (wireType) {
-    case 0: { const [, p] = readVarint(bytes, pos); return p; }
-    case 1: return pos + 8;
-    case 2: { const [len, p] = readVarint(bytes, pos); return p + len; }
-    case 5: return pos + 4;
-    default: return bytes.length;
-  }
-}
-
-function parseSentencePiece(bytes) {
-  let piece = '';
-  let score = 0;
-  let pos = 0;
-  while (pos < bytes.length) {
-    const [fieldNum, wireType, newPos] = readTag(bytes, pos);
-    pos = newPos;
-    if (fieldNum === 1 && wireType === 2) {
-      const [len, p] = readVarint(bytes, pos);
-      pos = p;
-      piece = new TextDecoder().decode(bytes.subarray(pos, pos + len));
-      pos += len;
-    } else if (fieldNum === 2 && wireType === 5) {
-      const view = new DataView(bytes.buffer, bytes.byteOffset + pos, 4);
-      score = view.getFloat32(0, true);
-      pos += 4;
-    } else {
-      pos = skipField(bytes, pos, wireType);
-    }
-  }
-  return { piece, score };
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 // --- Message handling ---
@@ -139,89 +30,133 @@ self.onmessage = async (e) => {
   switch (msg.type) {
     case 'load-model': {
       try {
-        // Import and initialize WASM module
-        const wasmModule = await import(chrome.runtime.getURL('wasm/pocket_tts.js'));
-        await wasmModule.default();
-        model = new wasmModule.WasmTTSModel();
+        // Import WASM module (cached across calls)
+        diag(`[TTS Worker] Importing WASM from: ${msg.wasmJsUrl}`);
+        if (!bindings) {
+          bindings = await import(msg.wasmJsUrl);
+        }
 
-        // Load model weights + tokenizer into WASM
+        // Initialize WASM runtime
+        diag('[TTS Worker] Initializing WASM runtime...');
+        await bindings.default();
+
+        // Create model
+        diag('[TTS Worker] Creating WasmTTSModel...');
+        model = new bindings.WasmTTSModel();
+
         // load_from_buffer(config_yaml, weights_data, tokenizer_bytes)
-        // Empty config = use defaults; tokenizer loaded from bundled file
-        const tokResp = await fetch(chrome.runtime.getURL('tokenizer.model'));
-        const tokBuffer = await tokResp.arrayBuffer();
-        model.load_from_buffer(
-          new Uint8Array([]),
-          new Uint8Array(msg.modelData),
-          new Uint8Array(tokBuffer),
-        );
+        // - config_yaml: REQUIRED — model architecture definition
+        // - weights_data: the 236MB safetensors file
+        // - tokenizer_bytes: pass empty Uint8Array(0) to use embedded tokenizer.json
+        const configBytes = new Uint8Array(msg.configData);
+        const weightsBytes = new Uint8Array(msg.modelData);
+        const tokenizerBytes = new Uint8Array(0); // use WASM-embedded tokenizer
 
-        // Also load JS tokenizer as reference (for potential xn API switch)
-        tokenizer = await UnigramTokenizer.fromModelFile(tokBuffer);
+        diag(`[TTS Worker] Loading: config=${configBytes.byteLength}B, weights=${(weightsBytes.byteLength / 1024 / 1024).toFixed(1)}MB, tokenizer=embedded`);
+        model.load_from_buffer(configBytes, weightsBytes, tokenizerBytes);
 
-        wasmInitialized = true;
-        console.log('[TTS Worker] Model loaded, sample_rate:', model.sample_rate);
-        self.postMessage({ type: 'model-ready' });
+        sampleRate = model.sample_rate;
+        diag(`[TTS Worker] Model loaded. is_ready=${model.is_ready()}, sample_rate=${sampleRate}`);
+
+        self.postMessage({ type: 'model-ready', sampleRate });
       } catch (err) {
-        self.postMessage({ type: 'error', error: err.message });
+        diag(`[TTS Worker] load-model ERROR: ${err}`);
+        self.postMessage({ type: 'error', error: String(err) });
       }
       break;
     }
 
     case 'load-voice': {
       try {
-        if (!loadedVoices.has(msg.voiceId)) {
-          model.load_voice_from_safetensors(new Uint8Array(msg.voiceData));
-          loadedVoices.set(msg.voiceId, loadedVoices.size);
-          console.log(`[TTS Worker] Voice ${msg.voiceId} loaded`);
-        }
+        diag(`[TTS Worker] Loading voice: ${msg.voiceId} (${msg.voiceData.byteLength}B)`);
+        // Always reload — the WASM model stores a single voice state,
+        // so loading a new voice replaces the previous one.
+        model.load_voice_from_safetensors(new Uint8Array(msg.voiceData));
+        diag(`[TTS Worker] Voice ${msg.voiceId} loaded`);
         self.postMessage({ type: 'voice-ready', voiceId: msg.voiceId });
       } catch (err) {
-        self.postMessage({ type: 'error', error: err.message });
+        diag(`[TTS Worker] load-voice ERROR: ${err}`);
+        self.postMessage({ type: 'error', error: String(err) });
       }
       break;
     }
 
     case 'generate': {
       try {
-        await runGeneration(msg.genId, msg.text, msg.voiceId);
+        stopRequested = false;
+        activeStreamToken++;
+        await runGeneration(msg.genId, msg.text, activeStreamToken);
       } catch (err) {
-        self.postMessage({ type: 'error', genId: msg.genId, error: err.message });
+        diag(`[TTS Worker] generate ERROR: ${err}`);
+        self.postMessage({ type: 'error', genId: msg.genId, error: String(err) });
       }
       break;
     }
 
     case 'cancel': {
       cancelledGenId = Math.max(cancelledGenId, msg.genId);
+      stopRequested = true;
+      activeStreamToken++;
       break;
     }
   }
 };
 
-async function runGeneration(genId, text, voiceId) {
+async function runGeneration(genId, text, streamToken) {
   if (genId <= cancelledGenId) return;
+  if (!model || !model.is_ready()) {
+    self.postMessage({ type: 'error', genId, error: 'Model not ready' });
+    return;
+  }
 
-  // start_stream() handles tokenization internally via the tokenizer
-  // loaded in load_from_buffer(). The JS UnigramTokenizer is kept as a
-  // reference for potential future switch to xn's API.
+  diag(`[TTS Worker] Starting generation: genId=${genId}, text="${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
+
   const stream = model.start_stream(text);
+  diag(`[TTS Worker] Stream created`);
 
-  while (true) {
-    if (genId <= cancelledGenId) return;
+  let chunkCount = 0;
 
-    const chunk = stream.next_chunk();
-    if (!chunk) break;
+  // Adaptive chunk sizing (matching official implementation):
+  // First 3 chunks: smaller for lower time-to-first-audio (~32ms = 768 samples)
+  // After that: larger for efficiency (~110ms = 2640 samples)
+  const startChunkSamples = Math.max(320, Math.floor(sampleRate * 0.032));
+  const steadyChunkSamples = Math.max(1024, Math.floor(sampleRate * 0.11));
 
-    if (genId <= cancelledGenId) return;
+  while (!stopRequested && streamToken === activeStreamToken) {
+    if (genId <= cancelledGenId) {
+      diag(`[TTS Worker] Cancelled at chunk ${chunkCount}`);
+      return;
+    }
+
+    const targetSamples = chunkCount < 3 ? startChunkSamples : steadyChunkSamples;
+    const chunk = stream.next_chunk_min_samples(targetSamples);
+
+    if (!chunk) {
+      diag(`[TTS Worker] Stream ended after ${chunkCount} chunks`);
+      break;
+    }
+
+    if (chunkCount < 3) {
+      diag(`[TTS Worker] Chunk ${chunkCount}: ${chunk.length} samples`);
+    }
 
     self.postMessage(
       { type: 'chunk', genId, data: chunk },
       [chunk.buffer],
     );
+    chunkCount++;
 
-    // Yield to event loop so cancel messages can be processed
-    await new Promise((r) => setTimeout(r, 0));
+    // Yield to event loop every 6 chunks (matching official implementation)
+    if (chunkCount % 6 === 0) {
+      await sleep(0);
+    }
   }
 
-  if (genId <= cancelledGenId) return;
+  if (stopRequested || streamToken !== activeStreamToken) {
+    diag(`[TTS Worker] Generation aborted`);
+    return;
+  }
+
+  diag(`[TTS Worker] Generation complete: ${chunkCount} chunks`);
   self.postMessage({ type: 'done', genId });
 }

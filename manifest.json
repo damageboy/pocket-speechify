@@ -4,6 +4,9 @@
   "version": "0.2.0",
   "description": "Text-to-speech with a floating pill player",
   "permissions": ["offscreen"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"
@@ -17,7 +20,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model"],
+      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model", "config.yaml"],
       "matches": ["<all_urls>"]
     }
   ]

@@ -2,6 +2,73 @@
 
 A Chrome extension that replicates the Speechify text-to-speech UI as a lightweight, self-contained tool.
 
+## Development Rules
+
+- **Every user interaction (button click, UI event) MUST have a `console.log` message** for debugging. This applies to all event handlers in pill-player.js, side-panels.js, hover-player.js, and any other UI code. Format: `console.log('[Pocket Speechify] <action> clicked/triggered')`.
+
+## Extension Architecture & Context Boundaries
+
+There are 4 execution contexts. Each has different API access. **Never assume an API from one context works in another.**
+
+### Content Script (content.js, src/*.js loaded via import)
+- **Runs in:** the web page's JS context (injected by Chrome)
+- **Has access to:** DOM, `chrome.runtime.sendMessage()`, `chrome.runtime.onMessage`
+- **Does NOT have:** Cache API (operates on page origin, not extension origin), `chrome.offscreen`, `chrome.tabs`, AudioContext for TTS
+- **Console visible in:** page DevTools (F12)
+- **Files:** `content.js`, `src/remote-tts.js`, `src/pill-player.js`, `src/side-panels.js`, `src/highlight.js`, `src/hover-player.js`, `src/scroll-nav.js`, `src/state.js`, `src/voices.js`, `src/content-extractor.js`, `src/icons.js`, `src/dom-utils.js`, `src/logger.js`, `src/mock-tts.js`
+
+### Service Worker (service-worker.js)
+- **Runs in:** extension background context
+- **Has access to:** `chrome.runtime`, `chrome.tabs`, `chrome.offscreen`, `chrome.runtime.getContexts()`
+- **Does NOT have:** DOM, `window`, AudioContext, Cache API (technically available but should NOT be used here — offscreen doc owns caching)
+- **Console visible in:** chrome://extensions → "service worker" link
+- **Role:** message router only. Routes messages between content scripts and offscreen document using `source` field tagging.
+
+### Offscreen Document (offscreen.html, offscreen.js)
+- **Runs in:** extension origin, hidden page
+- **Has access to:** Cache API (extension origin), AudioContext, Web Workers, `chrome.runtime.sendMessage()`, `chrome.runtime.onMessage`, `chrome.runtime.getURL()`, full DOM APIs, ES module imports
+- **Does NOT have:** `chrome.tabs`, visible UI
+- **Console visible in:** its own DevTools (may appear under chrome://extensions inspect views, or may need manual inspection)
+- **Role:** owns audio playback, weight/voice caching, download lifecycle, word timing estimation, spawns and manages the TTS worker
+
+### TTS Web Worker (src/tts-worker.js)
+- **Runs in:** worker thread spawned by offscreen document
+- **Has access to:** `self.postMessage()`, `self.onmessage`, `importScripts()`, dynamic `import()` (can import `chrome-extension://` URLs passed to it), `console.log` (visible in offscreen doc's DevTools)
+- **Does NOT have:** `chrome.*` APIs (no `chrome.runtime`, no `chrome.runtime.getURL()`), DOM, Cache API, AudioContext
+- **Console visible in:** offscreen document's DevTools (worker sub-panel)
+- **Role:** WASM inference only. Receives model weights, config, voice data, and text via `postMessage`. Sends back audio chunks.
+
+### Message Routing Pattern
+```
+Content Script ──(chrome.runtime.sendMessage)──► Service Worker
+    source: 'content'                               │
+                                                     │ (chrome.runtime.sendMessage)
+                                                     ▼
+                                              Offscreen Document
+                                              source: 'service-worker'
+                                                     │
+                                                     │ (worker.postMessage)
+                                                     ▼
+                                                TTS Web Worker
+
+TTS Web Worker ──(self.postMessage)──► Offscreen Document
+                                              │
+                                              │ (chrome.runtime.sendMessage)
+                                              ▼
+                                        Service Worker
+                                        source: 'offscreen'
+                                              │
+                                              │ (chrome.tabs.sendMessage, strips source)
+                                              ▼
+                                        Content Script
+```
+
+- Content script messages identified by `sender.tab` in service worker
+- Offscreen messages identified by `msg.source === 'offscreen'`
+- Service worker adds `source: 'service-worker'` when forwarding to offscreen
+- Service worker strips `source` when relaying to content scripts
+- TTS Worker receives all data via `postMessage` (URLs, ArrayBuffers) — it cannot fetch extension resources itself
+
 ## Goal
 
 Build a Chrome extension with a floating pill player that reads web page text aloud, matching Speechify's UI/UX patterns.
