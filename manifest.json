@@ -1,8 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Pocket Speechify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Text-to-speech with a floating pill player",
+  "permissions": ["offscreen"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -10,10 +15,9 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": [],
   "web_accessible_resources": [
     {
-      "resources": ["src/*.js", "css/*.css"],
+      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model"],
       "matches": ["<all_urls>"]
     }
   ]
