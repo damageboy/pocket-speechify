@@ -1,12 +1,8 @@
 // src/tts-worker.js
-
-// NOTE: The WASM module import path depends on the wasm-bindgen output.
-// This will be adjusted once the WASM binary is actually built and vendored.
-// For babybirdprd/pocket-tts, the API surface is:
-//   WasmTTSModel: load_from_buffer, load_voice_from_safetensors, start_stream, sample_rate
-//   WasmTTSStream: next_chunk
-// For LaurentMazare/xn, the API surface is:
-//   Model: new, add_voice, prepare_text, start_generation, generation_step, sample_rate
+//
+// WASM TTS worker — loads pocket-tts model and runs streaming inference.
+// API: WasmTTSModel (load_from_buffer, load_voice_from_safetensors, start_stream)
+//      WasmTTSStream (next_chunk)
 
 let model = null;
 let loadedVoices = new Map(); // voiceId → index
@@ -143,23 +139,27 @@ self.onmessage = async (e) => {
   switch (msg.type) {
     case 'load-model': {
       try {
-        // Dynamic import of WASM module — path adjusted once vendored
-        // const wasmModule = await import(chrome.runtime.getURL('wasm/pocket_tts.js'));
-        // await wasmModule.default(); // init WASM
-        // model = new wasmModule.WasmTTSModel();
-        // model.load_from_buffer(new Uint8Array([]), new Uint8Array(msg.modelData), new Uint8Array([]));
+        // Import and initialize WASM module
+        const wasmModule = await import(chrome.runtime.getURL('wasm/pocket_tts.js'));
+        await wasmModule.default();
+        model = new wasmModule.WasmTTSModel();
 
-        // Load tokenizer as reference
-        // const tokUrl = chrome.runtime.getURL('tokenizer.model');
-        // const tokResp = await fetch(tokUrl);
-        // const tokBuffer = await tokResp.arrayBuffer();
-        // tokenizer = await UnigramTokenizer.fromModelFile(tokBuffer);
+        // Load model weights + tokenizer into WASM
+        // load_from_buffer(config_yaml, weights_data, tokenizer_bytes)
+        // Empty config = use defaults; tokenizer loaded from bundled file
+        const tokResp = await fetch(chrome.runtime.getURL('tokenizer.model'));
+        const tokBuffer = await tokResp.arrayBuffer();
+        model.load_from_buffer(
+          new Uint8Array([]),
+          new Uint8Array(msg.modelData),
+          new Uint8Array(tokBuffer),
+        );
 
-        // TODO: Uncomment above once WASM binary is vendored.
-        // For now, signal ready so the pipeline doesn't block.
-        console.log('[TTS Worker] load-model received (WASM not yet vendored)');
+        // Also load JS tokenizer as reference (for potential xn API switch)
+        tokenizer = await UnigramTokenizer.fromModelFile(tokBuffer);
+
         wasmInitialized = true;
-
+        console.log('[TTS Worker] Model loaded, sample_rate:', model.sample_rate);
         self.postMessage({ type: 'model-ready' });
       } catch (err) {
         self.postMessage({ type: 'error', error: err.message });
@@ -170,9 +170,9 @@ self.onmessage = async (e) => {
     case 'load-voice': {
       try {
         if (!loadedVoices.has(msg.voiceId)) {
-          // model.load_voice_from_safetensors(new Uint8Array(msg.voiceData));
+          model.load_voice_from_safetensors(new Uint8Array(msg.voiceData));
           loadedVoices.set(msg.voiceId, loadedVoices.size);
-          console.log(`[TTS Worker] voice ${msg.voiceId} loaded (stub)`);
+          console.log(`[TTS Worker] Voice ${msg.voiceId} loaded`);
         }
         self.postMessage({ type: 'voice-ready', voiceId: msg.voiceId });
       } catch (err) {
@@ -200,38 +200,27 @@ self.onmessage = async (e) => {
 async function runGeneration(genId, text, voiceId) {
   if (genId <= cancelledGenId) return;
 
-  // The babybirdprd WASM API accepts raw text in start_stream() —
-  // it handles tokenization internally via the tokenizer loaded in load_from_buffer().
-  // Our JS tokenizer is NOT used for the WASM path. It exists as a fallback reference
-  // and for future use if we switch to the xn API (which requires JS-side tokenization).
-  //
-  // If using xn's API instead, replace start_stream(text) with:
-  //   const tokenIds = tokenizer.encode('▁' + text.replace(/ /g, '▁'));
-  //   model.start_generation(voiceIndex, tokenIds, framesAfterEos, 0.7);
-  //   ... loop model.generation_step() instead of stream.next_chunk()
+  // start_stream() handles tokenization internally via the tokenizer
+  // loaded in load_from_buffer(). The JS UnigramTokenizer is kept as a
+  // reference for potential future switch to xn's API.
+  const stream = model.start_stream(text);
 
-  // TODO: Uncomment once WASM binary is vendored:
-  // const stream = model.start_stream(text);
-  //
-  // while (true) {
-  //   if (genId <= cancelledGenId) return;
-  //
-  //   const chunk = stream.next_chunk();
-  //   if (!chunk) break;
-  //
-  //   if (genId <= cancelledGenId) return;
-  //
-  //   self.postMessage(
-  //     { type: 'chunk', genId, data: chunk },
-  //     [chunk.buffer],
-  //   );
-  //
-  //   // Yield to event loop so cancel messages can be processed
-  //   await new Promise((r) => setTimeout(r, 0));
-  // }
+  while (true) {
+    if (genId <= cancelledGenId) return;
 
-  // Stub: immediately signal done (no audio generated)
-  console.log(`[TTS Worker] generate stub for genId=${genId}, text="${text.substring(0, 50)}..."`);
+    const chunk = stream.next_chunk();
+    if (!chunk) break;
+
+    if (genId <= cancelledGenId) return;
+
+    self.postMessage(
+      { type: 'chunk', genId, data: chunk },
+      [chunk.buffer],
+    );
+
+    // Yield to event loop so cancel messages can be processed
+    await new Promise((r) => setTimeout(r, 0));
+  }
 
   if (genId <= cancelledGenId) return;
   self.postMessage({ type: 'done', genId });
