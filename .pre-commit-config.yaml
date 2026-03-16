@@ -1,0 +1,23 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.webp$|\.wasm$|\.safetensors$|\.model$'
+      - id: end-of-file-fixer
+        exclude: '\.webp$|\.wasm$|\.safetensors$|\.model$'
+      - id: check-json
+        files: '\.json$'
+      - id: check-yaml
+        files: '\.yaml$'
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: verify-build
+        name: verify extension build
+        entry: bash scripts/verify-build.sh
+        language: system
+        always_run: true
+        pass_filenames: false

@@ -1,0 +1,116 @@
+#!/bin/bash
+# Verify the Chrome extension has all required files and no obvious issues.
+# Run by pre-commit hook and can be run standalone: ./scripts/verify-build.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+EXT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$EXT_DIR"
+
+ERRORS=0
+
+check() {
+  if [ ! -f "$1" ]; then
+    echo "MISSING: $1"
+    ERRORS=$((ERRORS + 1))
+  fi
+}
+
+echo "=== Verifying extension build ==="
+
+# Core files
+check "manifest.json"
+check "content.js"
+check "service-worker.js"
+check "offscreen.html"
+check "offscreen.js"
+check "config.yaml"
+
+# Source modules
+check "src/remote-tts.js"
+check "src/mock-tts.js"
+check "src/state.js"
+check "src/voices.js"
+check "src/pill-player.js"
+check "src/side-panels.js"
+check "src/highlight.js"
+check "src/hover-player.js"
+check "src/scroll-nav.js"
+check "src/content-extractor.js"
+check "src/icons.js"
+check "src/dom-utils.js"
+check "src/logger.js"
+check "src/word-timing-estimator.js"
+check "src/tts-worker.js"
+
+# CSS
+check "css/player.css"
+
+# WASM artifacts — rebuild if missing
+if [ ! -f "wasm/pocket_tts_bg.wasm" ] || [ ! -f "wasm/pocket_tts.js" ]; then
+  echo "WASM artifacts missing — attempting rebuild..."
+  if command -v cargo &>/dev/null && command -v wasm-pack &>/dev/null; then
+    bash scripts/build-wasm.sh
+    if [ ! -f "wasm/pocket_tts_bg.wasm" ]; then
+      echo "ERROR: WASM rebuild failed"
+      ERRORS=$((ERRORS + 1))
+    else
+      echo "WASM rebuilt successfully"
+    fi
+  else
+    echo "ERROR: wasm/pocket_tts_bg.wasm missing and cannot rebuild (need cargo + wasm-pack)"
+    ERRORS=$((ERRORS + 1))
+  fi
+else
+  echo "WASM artifacts present"
+fi
+
+# Tokenizer — download if missing
+if [ ! -f "tokenizer.model" ]; then
+  echo "tokenizer.model missing — downloading..."
+  curl -sL -o tokenizer.model \
+    "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tokenizer.model"
+  echo "Downloaded tokenizer.model"
+fi
+check "tokenizer.model"
+
+# Voice avatars
+for voice in alba marius javert jean fantine cosette eponine azelma; do
+  check "assets/voices/${voice}.webp"
+done
+
+# Validate manifest.json is parseable
+if ! python3 -c "import json; json.load(open('manifest.json'))" 2>/dev/null; then
+  echo "ERROR: manifest.json is not valid JSON"
+  ERRORS=$((ERRORS + 1))
+fi
+
+# Check JS files for syntax errors (using node if available)
+if command -v node &>/dev/null; then
+  for js in content.js service-worker.js offscreen.js src/*.js; do
+    if ! node --check "$js" 2>/dev/null; then
+      echo "SYNTAX ERROR: $js"
+      ERRORS=$((ERRORS + 1))
+    fi
+  done
+fi
+
+# Check manifest version matches expected
+VERSION=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+echo "Extension version: $VERSION"
+
+# Check WASM binary size (should be > 1MB)
+WASM_SIZE=$(wc -c < wasm/pocket_tts_bg.wasm)
+if [ "$WASM_SIZE" -lt 1000000 ]; then
+  echo "ERROR: wasm/pocket_tts_bg.wasm is too small ($WASM_SIZE bytes) — may be corrupt"
+  ERRORS=$((ERRORS + 1))
+fi
+
+if [ "$ERRORS" -gt 0 ]; then
+  echo ""
+  echo "=== FAILED: $ERRORS error(s) found ==="
+  exit 1
+fi
+
+echo "=== All checks passed ==="
