@@ -1,25 +1,22 @@
+import { VOICES, DEFAULT_VOICE_ID } from './voices.js';
+
+function buildEmptyVoiceCache() {
+  return Object.fromEntries(VOICES.map(v => [v.id, 'uncached']));
+}
+
 const INITIAL_STATE = {
   playback: 'idle',
   currentParagraphIndex: null,
   currentSentenceIndex: null,
   currentWordIndex: null,
   speed: 1.0,
-  voiceId: 'alba',
+  voiceId: DEFAULT_VOICE_ID,
   panelOpen: null,
   pillExpanded: false,
   totalDurationSec: 0,
   elapsedSec: 0,
   modelCached: false,
-  voiceCache: {
-    alba: 'uncached',
-    marius: 'uncached',
-    javert: 'uncached',
-    jean: 'uncached',
-    fantine: 'uncached',
-    cosette: 'uncached',
-    eponine: 'uncached',
-    azelma: 'uncached',
-  },
+  voiceCache: buildEmptyVoiceCache(),
   downloadProgress: null,
 };
 
@@ -51,5 +48,5 @@ export function createState() {
     dispatch({ ...INITIAL_STATE });
   }
 
-  return { get, dispatch, subscribe, reset };
+  return { get, dispatch, subscribe, reset, buildEmptyVoiceCache };
 }

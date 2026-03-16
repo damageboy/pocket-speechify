@@ -117,10 +117,6 @@ export class RemoteTTS extends EventTarget {
     // Voice change takes effect on next sentence (per spec)
   }
 
-  getDownloadState() {
-    return { model: this._modelState || 'unknown', voices: this._voiceCacheState || new Map() };
-  }
-
   // --- Private ---
 
   #useFallback() {

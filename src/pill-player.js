@@ -7,6 +7,27 @@ function formatDuration(totalSec, elapsedSec) {
   return { mins: String(mins), secs: String(secs).padStart(2, '0') };
 }
 
+// Build download progress button (circular ring with percentage text inside)
+function renderDownloadButton(percent) {
+  const ring = document.createElement('div');
+  ring.className = 'progress-ring';
+
+  const progressSvg = circularProgress(percent);
+  progressSvg.style.cssText = 'width: 100%; height: 100%;';
+  ring.appendChild(progressSvg);
+
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-32 btn-cta';
+  btn.style.pointerEvents = 'none';
+  btn.setAttribute('aria-label', `Downloading: ${percent}%`);
+  const pctText = document.createElement('span');
+  pctText.style.cssText = 'font-size: 9px; font-weight: 700; pointer-events: none;';
+  pctText.textContent = `${percent}%`;
+  btn.appendChild(pctText);
+  ring.appendChild(btn);
+  return ring;
+}
+
 // Build idle play button
 function renderIdlePlayButton(hasContent, actions) {
   const btn = document.createElement('button');
@@ -215,10 +236,7 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     chrome.runtime.sendMessage({ type: 'tts-clear-cache', source: 'content' });
     state.dispatch({
       modelCached: false,
-      voiceCache: {
-        alba: 'uncached', marius: 'uncached', javert: 'uncached', jean: 'uncached',
-        fantine: 'uncached', cosette: 'uncached', eponine: 'uncached', azelma: 'uncached',
-      },
+      voiceCache: state.buildEmptyVoiceCache(),
       downloadProgress: null,
     });
     // Flash the button to confirm
@@ -309,19 +327,7 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     if (current.downloadProgress !== prev.downloadProgress) {
       while (toggleSlot.firstChild) toggleSlot.removeChild(toggleSlot.firstChild);
       if (current.downloadProgress && current.downloadProgress.percent >= 0) {
-        const dlPercent = current.downloadProgress.percent;
-        toggleSlot.appendChild(renderToggleButton('paused', dlPercent, actions));
-        // Replace the inner icon with percentage text
-        const innerBtn = toggleSlot.querySelector('.btn-cta');
-        if (innerBtn) {
-          while (innerBtn.firstChild) innerBtn.removeChild(innerBtn.firstChild);
-          const pctText = document.createElement('span');
-          pctText.style.cssText = 'font-size: 9px; font-weight: 700; pointer-events: none;';
-          pctText.textContent = `${dlPercent}%`;
-          innerBtn.appendChild(pctText);
-          innerBtn.setAttribute('aria-label', `Downloading ${current.downloadProgress.asset}: ${dlPercent}%`);
-          innerBtn.style.pointerEvents = 'none';
-        }
+        toggleSlot.appendChild(renderDownloadButton(current.downloadProgress.percent));
         skipButtons.style.display = 'none';
       } else if (!current.downloadProgress) {
         // Download done — restore correct play state

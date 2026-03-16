@@ -11,7 +11,6 @@ let model = null;
 let sampleRate = 24000;
 let cancelledGenId = -1;
 let activeStreamToken = 0;
-let stopRequested = false;
 
 function diag(m) {
   console.log(m);
@@ -83,7 +82,6 @@ self.onmessage = async (e) => {
 
     case 'generate': {
       try {
-        stopRequested = false;
         activeStreamToken++;
         await runGeneration(msg.genId, msg.text, activeStreamToken);
       } catch (err) {
@@ -95,7 +93,6 @@ self.onmessage = async (e) => {
 
     case 'cancel': {
       cancelledGenId = Math.max(cancelledGenId, msg.genId);
-      stopRequested = true;
       activeStreamToken++;
       break;
     }
@@ -122,7 +119,7 @@ async function runGeneration(genId, text, streamToken) {
   const startChunkSamples = Math.max(320, Math.floor(sampleRate * 0.032));
   const steadyChunkSamples = Math.max(1024, Math.floor(sampleRate * 0.11));
 
-  while (!stopRequested && streamToken === activeStreamToken) {
+  while (streamToken === activeStreamToken) {
     if (genId <= cancelledGenId) {
       diag(`[TTS Worker] Cancelled at chunk ${chunkCount}`);
       return;
@@ -152,7 +149,7 @@ async function runGeneration(genId, text, streamToken) {
     }
   }
 
-  if (stopRequested || streamToken !== activeStreamToken) {
+  if (streamToken !== activeStreamToken) {
     diag(`[TTS Worker] Generation aborted`);
     return;
   }

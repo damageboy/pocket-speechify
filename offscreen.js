@@ -17,6 +17,7 @@ let paused = false;
 let deferredEvents = [];
 let currentSentenceMeta = null;
 let wordTimingEstimator = null;
+let currentLoadedVoiceId = null;
 
 // --- AudioContext ---
 
@@ -95,7 +96,8 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
   const chunks = [...existingChunks];
   let received = startByte;
 
-  let lastCheckpointPercent = 0;
+  let lastCheckpointBucket = -1;
+  let lastProgressBucket = -1;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -103,24 +105,29 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
       chunks.push(value);
       received += value.length;
       const percent = contentLength > 0 ? Math.round((received / contentLength) * 100) : -1;
-      sendToServiceWorker({ type: 'download-progress', asset, voiceId, percent });
 
-      // Periodically checkpoint partial data every 10% so progress survives
-      // offscreen document being killed by Chrome
-      if (percent >= lastCheckpointPercent + 10) {
-        lastCheckpointPercent = Math.floor(percent / 10) * 10;
+      // Throttle progress IPC to every 2% to avoid flooding the message bus
+      const progressBucket = Math.floor(percent / 2);
+      if (progressBucket > lastProgressBucket) {
+        lastProgressBucket = progressBucket;
+        sendToServiceWorker({ type: 'download-progress', asset, voiceId, percent });
+      }
+
+      // Checkpoint partial data every 10% so progress survives offscreen doc being killed
+      const checkpointBucket = Math.floor(percent / 10);
+      if (checkpointBucket > lastCheckpointBucket) {
+        lastCheckpointBucket = checkpointBucket;
         const partial = mergeChunks(chunks, received);
         await putCache(partialKey, partial.buffer);
         await putCache(metaKey, new TextEncoder().encode(JSON.stringify({ received })).buffer);
-        console.log(`[Offscreen] Checkpoint saved at ${percent}% (${(received / 1024 / 1024).toFixed(1)}MB)`);
+        logToSW(`[Offscreen] Checkpoint saved at ${percent}% (${(received / 1024 / 1024).toFixed(1)}MB)`);
       }
     }
   } catch (err) {
-    // Network interrupted — save partial progress for resume
     const partial = mergeChunks(chunks, received);
     await putCache(partialKey, partial.buffer);
     await putCache(metaKey, new TextEncoder().encode(JSON.stringify({ received })).buffer);
-    console.log(`[Offscreen] Download interrupted at ${(received / 1024 / 1024).toFixed(1)}MB. Will resume on next attempt.`);
+    logToSW(`[Offscreen] Download interrupted at ${(received / 1024 / 1024).toFixed(1)}MB. Will resume on next attempt.`);
     throw err;
   }
 
@@ -352,10 +359,12 @@ async function ensureWorker(modelData, voiceData, voiceId) {
     await waitForWorkerMessage('model-ready');
   }
 
-  // WASM model stores a single voice state — always load the requested voice
-  // Don't transfer voiceData (we might need to reload it if offscreen doc is recreated)
-  worker.postMessage({ type: 'load-voice', voiceId, voiceData });
-  await waitForWorkerMessage('voice-ready');
+  // WASM model stores a single voice state — only reload if voice changed
+  if (currentLoadedVoiceId !== voiceId) {
+    worker.postMessage({ type: 'load-voice', voiceId, voiceData });
+    await waitForWorkerMessage('voice-ready');
+    currentLoadedVoiceId = voiceId;
+  }
 }
 
 function waitForWorkerMessage(expectedType, timeoutMs = 30000) {
@@ -388,7 +397,6 @@ function handleWorkerMessage(msg) {
   }
   switch (msg.type) {
     case 'chunk': {
-      console.log(`[Offscreen] Audio chunk: ${msg.data.length} samples`);
       scheduleAudioChunk(msg.data, msg.genId);
       break;
     }
