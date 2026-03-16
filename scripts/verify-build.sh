@@ -81,7 +81,7 @@ for voice in alba marius javert jean fantine cosette eponine azelma; do
 done
 
 # Validate manifest.json is parseable
-if ! python3 -c "import json; json.load(open('manifest.json'))" 2>/dev/null; then
+if ! node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))" 2>/dev/null; then
   echo "ERROR: manifest.json is not valid JSON"
   ERRORS=$((ERRORS + 1))
 fi
@@ -97,7 +97,7 @@ if command -v node &>/dev/null; then
 fi
 
 # Check manifest version matches expected
-VERSION=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+VERSION=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('manifest.json','utf8')).version)")
 echo "Extension version: $VERSION"
 
 # Check WASM binary size (should be > 1MB)

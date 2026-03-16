@@ -18,32 +18,52 @@ jobs:
         with:
           fetch-depth: 0  # full history for git describe
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Build WASM (if not vendored)
+      # --- Rust + WASM (only if WASM not vendored) ---
+      - name: Check if WASM needs building
+        id: wasm-check
         run: |
-          if [ ! -f wasm/pocket_tts_bg.wasm ]; then
-            bash scripts/build-wasm.sh
+          if [ -f wasm/pocket_tts_bg.wasm ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
           else
-            echo "WASM binary already vendored, skipping build"
+            echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Setup Rust
+        if: steps.wasm-check.outputs.needed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry + build
+        if: steps.wasm-check.outputs.needed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-pack
+          key: cargo-wasm-${{ runner.os }}-${{ hashFiles('scripts/build-wasm.sh') }}
+          restore-keys: cargo-wasm-${{ runner.os }}-
+
+      - name: Install wasm-pack
+        if: steps.wasm-check.outputs.needed == 'true'
+        run: |
+          if ! command -v wasm-pack &>/dev/null; then
+            cargo install wasm-pack
+          else
+            echo "wasm-pack already cached"
+          fi
+
+      - name: Build WASM
+        if: steps.wasm-check.outputs.needed == 'true'
+        run: bash scripts/build-wasm.sh
+
+      # --- Verify + Package ---
       - name: Verify build
         run: bash scripts/verify-build.sh
 
@@ -52,7 +72,7 @@ jobs:
         run: |
           VERSION=$(bash scripts/stamp-version.sh)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          bash scripts/package.sh "pocket-speechify-${VERSION}.zip"
+          bash scripts/package.sh "pocket-speechify-${VERSION}"
 
       # Untagged builds: upload as artifact only
       - name: Upload build artifact
