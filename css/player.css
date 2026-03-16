@@ -994,7 +994,7 @@
   padding: 8px 16px;
   border-radius: 8px;
   border: none;
-  background: var(--bg-hover);
+  background: var(--color-alert);
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 500;
@@ -1004,7 +1004,7 @@
 }
 
 .settings-action-btn:hover {
-  background: var(--bg-active);
+  background: #d47a00;
 }
 
 .settings-action-btn:disabled {
