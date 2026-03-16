@@ -265,18 +265,20 @@ function scheduleOneChunk(float32Data, genId) {
         },
       };
       const tid = setTimeout(() => {
-        if (genId === currentGenId) {
-          sendToServiceWorker(wordEvent);
-        }
+        // Don't emit word events if paused or generation changed
+        if (genId !== currentGenId || paused) return;
+        sendToServiceWorker(wordEvent);
       }, delay * 1000);
       pendingWordTimeouts.push(tid);
     }
   }
 
-  // Elapsed time update
-  sendToServiceWorker({
-    type: 'tts-elapsed', genId, elapsedSec: cumulativeScheduledSec / currentSpeed,
-  });
+  // Elapsed time update (only when not paused)
+  if (!paused) {
+    sendToServiceWorker({
+      type: 'tts-elapsed', genId, elapsedSec: cumulativeScheduledSec / currentSpeed,
+    });
+  }
 }
 
 function clearPendingWordEvents() {
@@ -384,19 +386,26 @@ async function handlePlay(msg) {
   currentSpeed = speed;
   currentSentenceMeta = sentenceMeta;
   sentenceAudioSec = 0;
-  paused = false;
 
   const ctx = getAudioContext();
-  if (ctx.state === 'suspended') await ctx.resume();
 
   if (isNewGeneration) {
+    // Only unpause on explicit new play — not on sentence continuation
+    paused = false;
+    if (ctx.state === 'suspended') await ctx.resume();
     cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
-    // Reset calibration accumulators on fresh play
     totalEstimatedSec = 0;
     totalActualSec = 0;
     timingCalibrationFactor = 1.0;
+  }
+
+  // If paused, don't proceed — the sentence will be generated into the queue
+  // and played when the user resumes
+  if (paused) {
+    logToSW('[Offscreen] Paused — queueing sentence for later playback');
+    // Still set up the word timing estimator so it's ready when we resume
   }
 
   // Record when this sentence's audio starts on the AudioContext timeline
@@ -532,20 +541,33 @@ function handleWorkerMessage(msg) {
             },
           };
           const tid = setTimeout(() => {
-            if (currentGenId === msg.genId) sendToServiceWorker(wordEvent);
+            if (currentGenId !== msg.genId || paused) return;
+            sendToServiceWorker(wordEvent);
           }, delay * 1000);
           pendingWordTimeouts.push(tid);
         }
       }
 
-      // Signal sentence done — but wait until audio actually finishes playing
-      const ctx = getAudioContext();
-      const delayUntilAudioDone = Math.max(0, (nextStartTime - ctx.currentTime) * 1000);
-      setTimeout(() => {
-        if (currentGenId === msg.genId) {
-          sendToServiceWorker({ type: 'tts-sentence-done', genId: currentGenId });
+      // Signal sentence done — wait until audio actually finishes playing.
+      // Use a polling approach so pause correctly delays the transition.
+      const sentenceDoneGenId = msg.genId;
+      function checkSentenceDone() {
+        if (currentGenId !== sentenceDoneGenId) return; // cancelled
+        if (paused) {
+          // Re-check after a bit — pause delays sentence transition
+          setTimeout(checkSentenceDone, 100);
+          return;
         }
-      }, delayUntilAudioDone);
+        const now = getAudioContext().currentTime;
+        if (now >= nextStartTime - 0.05) {
+          // Audio finished playing
+          sendToServiceWorker({ type: 'tts-sentence-done', genId: sentenceDoneGenId });
+        } else {
+          // Still playing — check again
+          setTimeout(checkSentenceDone, Math.max(50, (nextStartTime - now) * 500));
+        }
+      }
+      checkSentenceDone();
       break;
     }
     case 'error': {
