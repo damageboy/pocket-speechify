@@ -1,0 +1,8 @@
+[    2155ms] [WARNING] jQuery.Deferred exception: $(...).fitVids is not a function TypeError: $(...).fitVids is not a function
+    at HTMLDocument.<anonymous> (https://bits.houmus.org/assets/js/main.min.js:9:24454)
+    at f (https://bits.houmus.org/assets/js/main.min.js:7:9959)
+    at d (https://bits.houmus.org/assets/js/main.min.js:7:10263) undefined @ https://bits.houmus.org/assets/js/main.min.js:6
+[    2168ms] TypeError: $(...).fitVids is not a function
+    at HTMLDocument.<anonymous> (https://bits.houmus.org/assets/js/main.min.js:9:24454)
+    at f (https://bits.houmus.org/assets/js/main.min.js:7:9959)
+    at d (https://bits.houmus.org/assets/js/main.min.js:7:10263)
