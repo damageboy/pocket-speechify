@@ -34,7 +34,10 @@ let pendingWordTimeouts = []; // timeout IDs for pending word events — cleared
 let sentenceStartCtxTime = 0; // AudioContext.currentTime when this sentence's audio started scheduling
 
 // Auto-regulation: calibrate word timing estimates from actual sentence durations.
-// calibrationFactor = actualDuration / estimatedDuration (starts at 1.0, adjusts per sentence)
+// Tracks cumulative estimated vs actual across ALL sentences in a generation.
+// calibrationFactor = totalActual / totalEstimated (converges as more data accumulates)
+let totalEstimatedSec = 0;
+let totalActualSec = 0;
 let timingCalibrationFactor = 1.0;
 
 function getAudioContext() {
@@ -364,19 +367,16 @@ async function handlePlay(msg) {
   // Clear pending word events from previous sentence to prevent stale highlights
   clearPendingWordEvents();
 
-  // Auto-regulate: if we have timing data from the previous sentence, update calibration
-  if (!isNewGeneration && sentenceAudioSec > 0 && wordTimingEstimator) {
-    // sentenceAudioSec = actual raw audio duration of the sentence that just finished
-    // Compare to what we estimated
-    const numWords = currentSentenceMeta?.words?.length || 1;
+  // Auto-regulate: accumulate actual vs estimated duration from previous sentence
+  if (!isNewGeneration && sentenceAudioSec > 0 && currentSentenceMeta) {
+    const numWords = currentSentenceMeta.words?.length || 1;
     const estimatedFrames = Math.ceil((numWords / 3 + 2) * 12.5);
     const estimatedSec = estimatedFrames / 12.5;
-    const actualSec = sentenceAudioSec;
-    if (estimatedSec > 0) {
-      // Blend: 70% previous calibration, 30% new observation (smooth adjustment)
-      const observed = actualSec / estimatedSec;
-      timingCalibrationFactor = timingCalibrationFactor * 0.7 + observed * 0.3;
-      logToSW(`[Offscreen] Timing calibration: estimated=${estimatedSec.toFixed(2)}s, actual=${actualSec.toFixed(2)}s, factor=${timingCalibrationFactor.toFixed(3)}`);
+    totalEstimatedSec += estimatedSec;
+    totalActualSec += sentenceAudioSec;
+    if (totalEstimatedSec > 0) {
+      timingCalibrationFactor = totalActualSec / totalEstimatedSec;
+      logToSW(`[Offscreen] Timing calibration: sentence est=${estimatedSec.toFixed(2)}s actual=${sentenceAudioSec.toFixed(2)}s | cumulative factor=${timingCalibrationFactor.toFixed(3)} (${totalActualSec.toFixed(1)}s/${totalEstimatedSec.toFixed(1)}s)`);
     }
   }
 
@@ -393,7 +393,10 @@ async function handlePlay(msg) {
     cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
-    timingCalibrationFactor = 1.0; // reset calibration on fresh play
+    // Reset calibration accumulators on fresh play
+    totalEstimatedSec = 0;
+    totalActualSec = 0;
+    timingCalibrationFactor = 1.0;
   }
 
   // Record when this sentence's audio starts on the AudioContext timeline
