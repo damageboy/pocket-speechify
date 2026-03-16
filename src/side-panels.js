@@ -237,12 +237,7 @@ function createVoicePanel(state) {
       avatar.appendChild(avatarImg);
 
       const cacheStatus = state.get().voiceCache[voice.id] || 'uncached';
-      if (cacheStatus === 'uncached') {
-        const dlIcon = document.createElement('div');
-        dlIcon.className = 'voice-download-indicator';
-        dlIcon.textContent = '↓';
-        avatar.appendChild(dlIcon);
-      } else if (cacheStatus === 'downloading') {
+      if (cacheStatus === 'downloading') {
         avatar.classList.add('downloading');
       }
 
