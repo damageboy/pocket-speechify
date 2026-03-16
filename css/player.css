@@ -982,3 +982,32 @@
 .settings-content-body {
   flex: 1;
 }
+
+.settings-field-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.settings-action-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.settings-action-btn:hover {
+  background: var(--bg-active);
+}
+
+.settings-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

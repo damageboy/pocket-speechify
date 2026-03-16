@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon } from './icons.js';
 import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
@@ -221,31 +221,6 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   pillBottom.className = 'pill-bottom';
   pillBottom.style.marginTop = '8px';
 
-  // Clear Cache button (32x32)
-  const clearCacheBtn = document.createElement('button');
-  clearCacheBtn.className = 'btn btn-32 btn-standard';
-  clearCacheBtn.setAttribute('aria-label', 'Clear TTS Cache');
-  const trashIc = trashIcon();
-  trashIc.style.width = '20px';
-  trashIc.style.height = '20px';
-  clearCacheBtn.appendChild(trashIc);
-  clearCacheBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    console.log('[Pocket Speechify] Clear Cache button clicked');
-    // Cache lives in the extension origin (offscreen doc), not the page origin.
-    // Route through the service worker → offscreen document.
-    chrome.runtime.sendMessage({ type: 'tts-clear-cache', source: 'content' });
-    state.dispatch({
-      modelCached: false,
-      voiceCache: state.buildEmptyVoiceCache(),
-      downloadProgress: null,
-    });
-    // Flash the button to confirm
-    clearCacheBtn.style.background = 'var(--bg-cta)';
-    setTimeout(() => { clearCacheBtn.style.background = ''; }, 500);
-  });
-  pillBottom.appendChild(clearCacheBtn);
-
   // About button (32x32)
   const aboutBtn = document.createElement('button');
   aboutBtn.className = 'btn btn-32 btn-standard';
@@ -353,6 +328,35 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     contentBody.className = 'settings-content-body';
     contentPane.appendChild(contentBody);
 
+    function renderContent() {
+      contentBody.innerHTML = '';
+      if (active === 'Debug') {
+        const desc = document.createElement('p');
+        desc.className = 'settings-field-desc';
+        desc.textContent = 'Clears the TTS model weights and all downloaded voice files stored in the extension cache (pocket-tts-v1). The model and voices will be re-downloaded on next use.';
+        const btn = document.createElement('button');
+        btn.className = 'settings-action-btn';
+        btn.textContent = 'Clear Cache';
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          console.log('[Pocket Speechify] Clear Cache button clicked');
+          // Cache lives in the extension origin (offscreen doc), not the page origin.
+          // Route through the service worker → offscreen document.
+          chrome.runtime.sendMessage({ type: 'tts-clear-cache', source: 'content' });
+          state.dispatch({
+            modelCached: false,
+            voiceCache: state.buildEmptyVoiceCache(),
+            downloadProgress: null,
+          });
+          btn.textContent = 'Cleared!';
+          btn.disabled = true;
+          setTimeout(() => { btn.textContent = 'Clear Cache'; btn.disabled = false; }, 2000);
+        });
+        contentBody.appendChild(desc);
+        contentBody.appendChild(btn);
+      }
+    }
+
     function renderNav() {
       nav.innerHTML = '';
       sections.forEach(({ key, icon }) => {
@@ -370,12 +374,14 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
           active = key;
           contentTitle.textContent = key;
           renderNav();
+          renderContent();
         });
         nav.appendChild(item);
       });
     }
 
     renderNav();
+    renderContent();
     dialog.appendChild(nav);
     dialog.appendChild(contentPane);
     dialog.addEventListener('click', (ev) => ev.stopPropagation());
