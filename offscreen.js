@@ -30,6 +30,12 @@ let schedulerTimer = null;
 let currentSentenceMeta = null;
 let wordTimingEstimator = null;
 let sentenceAudioSec = 0;    // raw audio seconds scheduled for current sentence
+let pendingWordTimeouts = []; // timeout IDs for pending word events — cleared on sentence transition
+let sentenceStartCtxTime = 0; // AudioContext.currentTime when this sentence's audio started scheduling
+
+// Auto-regulation: calibrate word timing estimates from actual sentence durations.
+// calibrationFactor = actualDuration / estimatedDuration (starts at 1.0, adjusts per sentence)
+let timingCalibrationFactor = 1.0;
 
 function getAudioContext() {
   if (!audioCtx) {
@@ -241,8 +247,9 @@ function scheduleOneChunk(float32Data, genId) {
   if (wordTimingEstimator && currentSentenceMeta) {
     const events = wordTimingEstimator.feedAudioDuration(sentenceAudioSec);
     for (const evt of events) {
-      // Schedule word event to fire when AudioContext reaches this point
-      const wordPlayTime = endTime - playDurationSec + (evt.estimatedTimeSec / currentSpeed);
+      // Schedule word event relative to sentence start on AudioContext timeline
+      const calibratedTime = evt.estimatedTimeSec * timingCalibrationFactor;
+      const wordPlayTime = sentenceStartCtxTime + (calibratedTime / currentSpeed);
       const delay = Math.max(0, wordPlayTime - ctx.currentTime);
       const wordEvent = {
         type: 'tts-word',
@@ -254,11 +261,12 @@ function scheduleOneChunk(float32Data, genId) {
           word: evt.word,
         },
       };
-      setTimeout(() => {
-        if (genId === currentGenId && !paused) {
+      const tid = setTimeout(() => {
+        if (genId === currentGenId) {
           sendToServiceWorker(wordEvent);
         }
       }, delay * 1000);
+      pendingWordTimeouts.push(tid);
     }
   }
 
@@ -266,6 +274,11 @@ function scheduleOneChunk(float32Data, genId) {
   sendToServiceWorker({
     type: 'tts-elapsed', genId, elapsedSec: cumulativeScheduledSec / currentSpeed,
   });
+}
+
+function clearPendingWordEvents() {
+  for (const tid of pendingWordTimeouts) clearTimeout(tid);
+  pendingWordTimeouts = [];
 }
 
 // --- Backpressure: signal worker to pause/resume ---
@@ -283,14 +296,15 @@ function checkBackpressure() {
 // --- Cancel ---
 
 function cancelGeneration(genId) {
-  // Stop all scheduled audio
   for (const { source } of scheduledSources) {
     try { source.stop(); source.disconnect(); } catch (_) {}
   }
   scheduledSources = [];
   audioQueue = [];
+  clearPendingWordEvents();
   nextStartTime = 0;
   playbackStartTime = 0;
+  sentenceStartCtxTime = 0;
   cumulativeScheduledSec = 0;
   sentenceAudioSec = 0;
   wordTimingEstimator = null;
@@ -347,10 +361,29 @@ async function handlePlay(msg) {
   if (isNewGeneration) {
     cancelGeneration(currentGenId);
   }
+  // Clear pending word events from previous sentence to prevent stale highlights
+  clearPendingWordEvents();
+
+  // Auto-regulate: if we have timing data from the previous sentence, update calibration
+  if (!isNewGeneration && sentenceAudioSec > 0 && wordTimingEstimator) {
+    // sentenceAudioSec = actual raw audio duration of the sentence that just finished
+    // Compare to what we estimated
+    const numWords = currentSentenceMeta?.words?.length || 1;
+    const estimatedFrames = Math.ceil((numWords / 3 + 2) * 12.5);
+    const estimatedSec = estimatedFrames / 12.5;
+    const actualSec = sentenceAudioSec;
+    if (estimatedSec > 0) {
+      // Blend: 70% previous calibration, 30% new observation (smooth adjustment)
+      const observed = actualSec / estimatedSec;
+      timingCalibrationFactor = timingCalibrationFactor * 0.7 + observed * 0.3;
+      logToSW(`[Offscreen] Timing calibration: estimated=${estimatedSec.toFixed(2)}s, actual=${actualSec.toFixed(2)}s, factor=${timingCalibrationFactor.toFixed(3)}`);
+    }
+  }
+
   currentGenId = genId;
   currentSpeed = speed;
   currentSentenceMeta = sentenceMeta;
-  sentenceAudioSec = 0; // reset per-sentence audio counter
+  sentenceAudioSec = 0;
   paused = false;
 
   const ctx = getAudioContext();
@@ -360,7 +393,11 @@ async function handlePlay(msg) {
     cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
+    timingCalibrationFactor = 1.0; // reset calibration on fresh play
   }
+
+  // Record when this sentence's audio starts on the AudioContext timeline
+  sentenceStartCtxTime = nextStartTime;
 
   // Initialize word timing estimator for this sentence
   const numWords = sentenceMeta.words.length;
@@ -473,12 +510,14 @@ function handleWorkerMessage(msg) {
       logToSW(`[Offscreen] Worker done for genId: ${msg.genId}`);
       if (msg.genId !== currentGenId) return;
 
-      // Finalize word timing — remaining words will fire as audio plays
-      if (wordTimingEstimator) {
+      // Finalize word timing — schedule remaining words before sentence end
+      if (wordTimingEstimator && currentSentenceMeta) {
         const remaining = wordTimingEstimator.finalize();
         const ctx = getAudioContext();
         for (const evt of remaining) {
-          const delay = Math.max(0, nextStartTime - ctx.currentTime - 0.1);
+          const calibratedTime = evt.estimatedTimeSec * timingCalibrationFactor;
+          const wordPlayTime = sentenceStartCtxTime + (calibratedTime / currentSpeed);
+          const delay = Math.max(0, wordPlayTime - ctx.currentTime);
           const wordEvent = {
             type: 'tts-word',
             genId: currentGenId,
@@ -489,9 +528,10 @@ function handleWorkerMessage(msg) {
               word: evt.word,
             },
           };
-          setTimeout(() => {
+          const tid = setTimeout(() => {
             if (currentGenId === msg.genId) sendToServiceWorker(wordEvent);
           }, delay * 1000);
+          pendingWordTimeouts.push(tid);
         }
       }
 
