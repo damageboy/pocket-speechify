@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, aboutIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, closeIcon, reportIcon, libraryIcon, settingsIcon, turnOffIcon } from './icons.js';
 import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
@@ -270,9 +270,9 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   const aboutBtn = document.createElement('button');
   aboutBtn.className = 'btn btn-32 btn-standard';
   aboutBtn.setAttribute('aria-label', 'About');
-  const aboutIc = aboutIcon();
-  aboutIc.style.width = '20px';
-  aboutIc.style.height = '20px';
+  const aboutIc = document.createElement('span');
+  aboutIc.style.cssText = 'font-size: 16px; font-weight: 700; line-height: 1; pointer-events: none;';
+  aboutIc.textContent = '?';
   aboutBtn.appendChild(aboutIc);
   aboutBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -313,17 +313,104 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     aboutPanel.addEventListener('click', (ev) => { ev.stopPropagation(); aboutPanel.remove(); });
     pill.appendChild(aboutPanel);
   });
-  pillBottom.appendChild(aboutBtn);
+  // Settings button (32x32)
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'btn btn-32 btn-standard';
+  settingsBtn.setAttribute('aria-label', 'Settings');
+  const settingsIc = settingsIcon();
+  settingsIc.style.width = '20px';
+  settingsIc.style.height = '20px';
+  settingsBtn.appendChild(settingsIc);
+  settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    console.log('[Pocket Speechify] Settings button clicked');
+    let settingsPanel = shadow.querySelector('.settings-panel');
+    if (settingsPanel) {
+      settingsPanel.remove();
+      return;
+    }
+    settingsPanel = document.createElement('div');
+    settingsPanel.className = 'settings-panel';
+    settingsPanel.style.cssText = [
+      'position: absolute',
+      'right: 60px',
+      'bottom: 0',
+      'width: 260px',
+      'background: var(--bg-primary)',
+      'border-radius: 12px',
+      'padding: 16px',
+      'box-shadow: var(--panel-shadow), 0px 4px 6px 0px rgba(0,0,0,0.32)',
+      'color: var(--text-primary)',
+      'font-family: system-ui, sans-serif',
+      'font-size: 13px',
+      'z-index: 10',
+      'animation: fadeIn 0.1s ease-out both',
+      'box-sizing: border-box',
+    ].join('; ');
 
-  // Upgrade to Premium button (32x32)
-  const upgradeBtn = document.createElement('button');
-  upgradeBtn.className = 'btn btn-32 btn-standard';
-  upgradeBtn.setAttribute('aria-label', 'Upgrade to Premium');
-  const upgradeIc = upgradeIcon();
-  upgradeIc.style.width = '20px';
-  upgradeIc.style.height = '20px';
-  upgradeBtn.appendChild(upgradeIc);
-  pillBottom.appendChild(upgradeBtn);
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;';
+    const title = document.createElement('span');
+    title.style.cssText = 'font-weight: 700; font-size: 15px;';
+    title.textContent = 'Settings';
+    const closePanelBtn = document.createElement('button');
+    closePanelBtn.style.cssText = [
+      'width: 20px', 'height: 20px', 'display: flex', 'align-items: center',
+      'justify-content: center', 'border: none', 'background: transparent',
+      'color: var(--text-primary)', 'cursor: pointer', 'border-radius: 50%',
+      'padding: 0', 'opacity: 1', 'transition: opacity 0.1s ease', 'flex-shrink: 0',
+    ].join('; ');
+    closePanelBtn.addEventListener('mouseenter', () => { closePanelBtn.style.opacity = '0.75'; });
+    closePanelBtn.addEventListener('mouseleave', () => { closePanelBtn.style.opacity = '1'; });
+    const closeIc = closeIcon();
+    closeIc.style.cssText = 'width: 12px; height: 12px;';
+    closePanelBtn.appendChild(closeIc);
+    closePanelBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      console.log('[Pocket Speechify] Settings panel close clicked');
+      settingsPanel.remove();
+    });
+    header.appendChild(title);
+    header.appendChild(closePanelBtn);
+    settingsPanel.appendChild(header);
+
+    // Divider
+    const divEl = document.createElement('div');
+    divEl.style.cssText = 'height: 1px; background: var(--bg-divider); margin-bottom: 16px;';
+    settingsPanel.appendChild(divEl);
+
+    // Empty content area (placeholder for future settings)
+    const content = document.createElement('div');
+    content.style.cssText = 'height: 32px;';
+    settingsPanel.appendChild(content);
+
+    // Footer with Save button
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding-top: 12px; border-top: 1px solid var(--bg-divider);';
+    const saveBtn = document.createElement('button');
+    saveBtn.style.cssText = [
+      'width: 100%', 'height: 36px', 'border-radius: 8px', 'border: none',
+      'background: var(--bg-cta)', 'color: var(--text-primary)',
+      'font-family: system-ui, sans-serif', 'font-size: 14px',
+      'font-weight: 600', 'cursor: pointer', 'transition: background 0.1s ease',
+    ].join('; ');
+    saveBtn.textContent = 'Save Settings';
+    saveBtn.addEventListener('mouseenter', () => { saveBtn.style.background = 'var(--bg-cta-hover)'; });
+    saveBtn.addEventListener('mouseleave', () => { saveBtn.style.background = 'var(--bg-cta)'; });
+    saveBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      console.log('[Pocket Speechify] Save Settings clicked');
+      settingsPanel.remove();
+    });
+    footer.appendChild(saveBtn);
+    settingsPanel.appendChild(footer);
+
+    settingsPanel.addEventListener('click', (ev) => ev.stopPropagation());
+    pill.appendChild(settingsPanel);
+  });
+  pillBottom.appendChild(settingsBtn);
+  pillBottom.appendChild(aboutBtn);
 
   // Turn Off button (20x20)
   const turnOffBtn = document.createElement('button');

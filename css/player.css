@@ -65,7 +65,7 @@
 .pill-container {
   position: fixed;
   right: 18px;
-  top: calc(50% - 171px);
+  top: calc(50% - 223px);
   width: 48px;
   pointer-events: auto;
   background: var(--bg-primary);
@@ -78,7 +78,7 @@
   gap: 4px;
   z-index: 2147483645;
   transform: scale(1.5);
-  transform-origin: right center;
+  transform-origin: top right;
   cursor: move;
   font-family: system-ui, sans-serif;
   color: var(--text-primary);
