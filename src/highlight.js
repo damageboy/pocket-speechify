@@ -70,24 +70,19 @@ let sentenceOverlays = [];
 let cachedColors = null;
 let cachedColorParaIdx = null;
 
-// --- Auto-scroll with user-scroll detection ---
-// If the user manually scrolls, disable auto-scroll for a cooldown period.
+// --- Auto-scroll control ---
+// Auto-scroll is disabled as soon as the user manually scrolls.
+// It only re-enables when the user explicitly clicks the scroll-nav widget
+// or when playback resets to idle.
 let autoScrollEnabled = true;
-let userScrollTimeout = null;
 let lastProgrammaticScroll = false;
 
 function onUserScroll() {
-  // Ignore scroll events we triggered ourselves
   if (lastProgrammaticScroll) {
     lastProgrammaticScroll = false;
     return;
   }
-  // User scrolled manually — disable auto-scroll for 5 seconds
   autoScrollEnabled = false;
-  if (userScrollTimeout) clearTimeout(userScrollTimeout);
-  userScrollTimeout = setTimeout(() => {
-    autoScrollEnabled = true;
-  }, 5000);
 }
 
 function updateHighlights(currentState, paragraphs) {
@@ -194,6 +189,11 @@ function mergeRects(rects) {
     width: r.right - r.left,
     height: r.bottom - r.top,
   }));
+}
+
+/** Re-enable auto-scroll (called by scroll-nav when user clicks to scroll back) */
+export function enableAutoScroll() {
+  autoScrollEnabled = true;
 }
 
 export function initHighlights(state, paragraphs) {

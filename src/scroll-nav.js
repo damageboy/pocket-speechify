@@ -1,5 +1,6 @@
 import { createRangeFromOffsets, scrollToCenter } from './dom-utils.js';
 import { chevronIcon } from './icons.js';
+import { enableAutoScroll } from './highlight.js';
 
 function throttle(fn, ms) {
   let last = 0;
@@ -154,9 +155,11 @@ export function initScrollNav(state, paragraphs) {
   }
 
   function scrollToHighlight() {
+    console.log('[Pocket Speechify] Scroll-nav clicked — scrolling to highlight');
     const rect = getHighlightRect();
     if (!rect) return;
 
+    enableAutoScroll(); // re-enable auto-scroll since user explicitly asked to go back
     scrollToCenter(rect);
     hidePill(topPill);
     hidePill(bottomPill);
