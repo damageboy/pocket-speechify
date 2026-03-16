@@ -279,19 +279,26 @@ async function handlePlay(msg) {
   const { genId, text, voiceId, speed, sentenceMeta } = msg;
   logToSW(`[Offscreen] handlePlay: genId=${genId}, text="${text?.substring(0, 50)}", voiceId=${voiceId}`);
 
-  if (genId > currentGenId) {
+  const isNewGeneration = genId > currentGenId;
+  if (isNewGeneration) {
     cancelGeneration(currentGenId);
   }
   currentGenId = genId;
   currentSpeed = speed;
   currentSentenceMeta = sentenceMeta;
-  cumulativeAudioSec = 0;
   paused = false;
 
   const ctx = getAudioContext();
   if (ctx.state === 'suspended') await ctx.resume();
-  nextStartTime = ctx.currentTime;
-  playbackStartTime = ctx.currentTime;
+
+  if (isNewGeneration) {
+    // Fresh start — reset audio timeline
+    cumulativeAudioSec = 0;
+    nextStartTime = ctx.currentTime;
+    playbackStartTime = ctx.currentTime;
+  }
+  // Continuation (same genId) — keep nextStartTime so new audio chains
+  // after the previous sentence's scheduled audio
 
   // Ensure model + voice are downloaded
   const modelKey = `${CACHE_NAME}/model/tts_b6369a24.safetensors`;
@@ -330,9 +337,12 @@ async function handlePlay(msg) {
   await ensureWorker(modelData, voiceData, voiceId);
   logToSW('[Offscreen] Worker ready. Starting generation...');
 
-  // Reset playback timing after potentially long download
-  nextStartTime = ctx.currentTime;
-  playbackStartTime = ctx.currentTime;
+  // Only reset timing if this was a new generation (first sentence after play/skip)
+  // For continuation sentences, nextStartTime already points past the previous sentence's audio
+  if (isNewGeneration) {
+    nextStartTime = ctx.currentTime;
+    playbackStartTime = ctx.currentTime;
+  }
 
   worker.postMessage({ type: 'generate', genId, text, voiceId });
   logToSW('[Offscreen] Generate message sent to worker');
