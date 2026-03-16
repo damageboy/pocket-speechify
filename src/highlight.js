@@ -11,46 +11,30 @@ function getEffectiveBackground(el) {
     const match = bg.match(/\d+/g);
     if (match) {
       const [r, g, b, a] = match.map(Number);
-      // If alpha is 0 or rgba with 0 alpha, keep walking
       if (a !== 0 && (r + g + b > 0 || a === undefined)) {
         return { r, g, b };
       }
     }
     node = node.parentElement;
   }
-  // Default: assume white
   return { r: 255, g: 255, b: 255 };
 }
 
-/**
- * Compute luminance (0-1) from RGB.
- */
 function luminance({ r, g, b }) {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
-/**
- * Derive highlight colors dynamically from the paragraph's background.
- * - Light backgrounds: blue-tinted overlay that's visible but not harsh
- * - Dark backgrounds: lighter blue overlay
- * Returns { sentenceColor, wordColor, opacity }
- */
 function deriveHighlightColors(bgColor) {
   const lum = luminance(bgColor);
-
   if (lum > 0.5) {
-    // Light background — use semi-transparent blue overlays
     return {
-      sentenceColor: 'rgba(171, 179, 254, 0.35)', // soft blue, visible on light
-      wordColor: 'rgba(86, 102, 240, 0.30)',       // brighter blue for word
-      opacity: 1, // opacity baked into rgba
+      sentenceColor: 'rgba(171, 179, 254, 0.35)',
+      wordColor: 'rgba(86, 102, 240, 0.30)',
     };
   } else {
-    // Dark background — use the Speechify dark theme colors
     return {
-      sentenceColor: 'rgba(68, 71, 102, 0.6)',     // #444766 at 60%
-      wordColor: 'rgba(86, 102, 240, 0.6)',         // #5666f0 at 60%
-      opacity: 1,
+      sentenceColor: 'rgba(68, 71, 102, 0.6)',
+      wordColor: 'rgba(86, 102, 240, 0.6)',
     };
   }
 }
@@ -59,13 +43,17 @@ function clearHighlights() {
   document.querySelectorAll('[data-ps-highlight="true"]').forEach(el => el.remove());
 }
 
+/**
+ * Create an overlay positioned in document coordinates (position: absolute).
+ * Rects from getBoundingClientRect() are viewport-relative, so we add scroll offsets.
+ */
 function createOverlay(rect, color) {
   const div = document.createElement('div');
   div.setAttribute('data-ps-highlight', 'true');
   div.style.cssText = [
-    'position: fixed',
-    `top: ${rect.top}px`,
-    `left: ${rect.left}px`,
+    'position: absolute',
+    `top: ${rect.top + window.scrollY}px`,
+    `left: ${rect.left + window.scrollX}px`,
     `width: ${rect.width}px`,
     `height: ${rect.height}px`,
     `background-color: ${color}`,
@@ -81,6 +69,26 @@ let lastSentenceKey = null;
 let sentenceOverlays = [];
 let cachedColors = null;
 let cachedColorParaIdx = null;
+
+// --- Auto-scroll with user-scroll detection ---
+// If the user manually scrolls, disable auto-scroll for a cooldown period.
+let autoScrollEnabled = true;
+let userScrollTimeout = null;
+let lastProgrammaticScroll = false;
+
+function onUserScroll() {
+  // Ignore scroll events we triggered ourselves
+  if (lastProgrammaticScroll) {
+    lastProgrammaticScroll = false;
+    return;
+  }
+  // User scrolled manually — disable auto-scroll for 5 seconds
+  autoScrollEnabled = false;
+  if (userScrollTimeout) clearTimeout(userScrollTimeout);
+  userScrollTimeout = setTimeout(() => {
+    autoScrollEnabled = true;
+  }, 5000);
+}
 
 function updateHighlights(currentState, paragraphs) {
   const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = currentState;
@@ -116,7 +124,6 @@ function updateHighlights(currentState, paragraphs) {
     clearHighlights();
     sentenceOverlays = [];
 
-    // Sentence highlight: merge overlapping/adjacent rects to avoid gaps at inline element boundaries
     const sentenceStartOffset = sentence.startOffset;
     const sentenceEndOffset = sentenceStartOffset + sentence.text.length;
     const sentenceRange = createRangeFromOffsets(para.element, sentenceStartOffset, sentenceEndOffset);
@@ -144,47 +151,43 @@ function updateHighlights(currentState, paragraphs) {
   if (wordRect.width > 0 && wordRect.height > 0) {
     document.body.appendChild(createOverlay(wordRect, wordColor));
 
-    // Auto-scroll if word is far outside viewport
-    const viewportHeight = window.innerHeight;
-    if (wordRect.top < -100 || wordRect.bottom > viewportHeight + 100) {
-      scrollToCenter(wordRect);
+    // Auto-scroll only if enabled (user hasn't scrolled away recently)
+    if (autoScrollEnabled) {
+      const viewportHeight = window.innerHeight;
+      if (wordRect.top < -100 || wordRect.bottom > viewportHeight + 100) {
+        lastProgrammaticScroll = true;
+        scrollToCenter(wordRect);
+      }
     }
   }
 }
 
 /**
- * Merge client rects that are on the same line (overlapping or adjacent vertically).
- * This prevents visible seams between inline elements (italic, links, etc.)
- * by combining rects that share the same approximate vertical position into one wide rect.
+ * Merge client rects on the same line to eliminate seams at inline element boundaries.
  */
 function mergeRects(rects) {
   if (rects.length === 0) return [];
 
-  // Sort by top, then left
   const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left);
   const merged = [];
   let current = { top: sorted[0].top, left: sorted[0].left, right: sorted[0].right, bottom: sorted[0].bottom };
 
   for (let i = 1; i < sorted.length; i++) {
     const rect = sorted[i];
-    // Same line: vertical overlap > 50% of the shorter rect's height
     const overlapThreshold = Math.min(current.bottom - current.top, rect.bottom - rect.top) * 0.5;
     const verticalOverlap = Math.min(current.bottom, rect.bottom) - Math.max(current.top, rect.top);
 
     if (verticalOverlap >= overlapThreshold && rect.left <= current.right + 2) {
-      // Merge: extend current rect
       current.right = Math.max(current.right, rect.right);
       current.top = Math.min(current.top, rect.top);
       current.bottom = Math.max(current.bottom, rect.bottom);
     } else {
-      // New line — push current and start a new one
       merged.push(current);
       current = { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom };
     }
   }
   merged.push(current);
 
-  // Convert to DOMRect-like objects
   return merged.map(r => ({
     top: r.top,
     left: r.left,
@@ -194,12 +197,16 @@ function mergeRects(rects) {
 }
 
 export function initHighlights(state, paragraphs) {
+  // Listen for user scroll to disable auto-scroll temporarily
+  window.addEventListener('scroll', onUserScroll, { passive: true });
+
   state.subscribe((current, prev) => {
     if (current.playback === 'idle' && prev.playback !== 'idle') {
       clearHighlights();
       lastSentenceKey = null;
       sentenceOverlays = [];
       cachedColorParaIdx = null;
+      autoScrollEnabled = true;
       return;
     }
     if (current.playback === 'playing' || current.playback === 'paused') {
