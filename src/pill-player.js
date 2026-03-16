@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, closeIcon, reportIcon, libraryIcon, settingsIcon, turnOffIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, closeIcon, settingsIcon, turnOffIcon } from './icons.js';
 import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
@@ -245,26 +245,6 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     setTimeout(() => { clearCacheBtn.style.background = ''; }, 500);
   });
   pillBottom.appendChild(clearCacheBtn);
-
-  // Report a Problem button (32x32)
-  const reportBtn = document.createElement('button');
-  reportBtn.className = 'btn btn-32 btn-standard';
-  reportBtn.setAttribute('aria-label', 'Report a Problem');
-  const reportIc = reportIcon();
-  reportIc.style.width = '20px';
-  reportIc.style.height = '20px';
-  reportBtn.appendChild(reportIc);
-  pillBottom.appendChild(reportBtn);
-
-  // View Library button (32x32)
-  const libraryBtn = document.createElement('button');
-  libraryBtn.className = 'btn btn-32 btn-standard';
-  libraryBtn.setAttribute('aria-label', 'View Library');
-  const libraryIc = libraryIcon();
-  libraryIc.style.width = '20px';
-  libraryIc.style.height = '20px';
-  libraryBtn.appendChild(libraryIc);
-  pillBottom.appendChild(libraryBtn);
 
   // About button (32x32)
   const aboutBtn = document.createElement('button');
