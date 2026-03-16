@@ -1,6 +1,9 @@
 (async function initPocketSpeechify() {
   const WORDS_PER_SEC = 4;
 
+  // Load logger first (also exposes __psSetLogLevel / __psGetLogLevel on window)
+  const { log } = await import(chrome.runtime.getURL('src/logger.js'));
+
   if (document.getElementById('pocket-speechify-host')) return;
 
   const host = document.createElement('div');
@@ -26,6 +29,7 @@
     sum + p.sentences.reduce((s, sent) => s + sent.words.length, 0), 0);
   const totalDurationSec = totalWords / (state.get().speed * WORDS_PER_SEC);
   state.dispatch({ totalDurationSec });
+  log.info(`Extracted ${paragraphs.length} paragraphs, ${totalWords} words, ~${Math.round(totalDurationSec)}s`);
 
   const { MockTTS } = await import(chrome.runtime.getURL('src/mock-tts.js'));
   const tts = new MockTTS();
@@ -44,6 +48,7 @@
   });
 
   tts.addEventListener('end', () => {
+    log.debug('TTS end — playback complete');
     wordsConsumed = 0;
     state.dispatch({
       playback: 'idle',
@@ -67,18 +72,20 @@
   // Actions object bridges UI clicks to TTS + state
   const actions = {
     play(fromParagraph = 0) {
-      if (paragraphs.length === 0) return;
+      if (paragraphs.length === 0) { log.warn('play: no paragraphs'); return; }
+      log.debug(`play(fromParagraph=${fromParagraph}), speed=${state.get().speed}`);
       wordsConsumed = 0;
       state.dispatch({ playback: 'playing' });
       tts.play(paragraphs, fromParagraph, 0, state.get().speed);
     },
     pause() {
+      log.debug('pause');
       state.dispatch({ playback: 'paused' });
       tts.pause();
     },
     resume() {
+      log.debug('resume');
       const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } = state.get();
-      // If TTS was stopped (e.g. after skip while paused), restart from current position
       if (pIdx !== null) {
         const fromWord = wordsBefore(pIdx, sIdx) - wordsBefore(pIdx);
         tts.stop();
@@ -89,6 +96,7 @@
       state.dispatch({ playback: 'playing' });
     },
     stop() {
+      log.debug('stop');
       tts.stop();
       wordsConsumed = 0;
       state.dispatch({
@@ -102,6 +110,7 @@
     skipForward() {
       const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, playback } = state.get();
       if (pIdx === null) return;
+      log.debug(`skipForward from p${pIdx}:s${sIdx}, playback=${playback}`);
       const para = paragraphs[pIdx];
       let newPIdx = pIdx, newSIdx = sIdx + 1;
       if (newSIdx >= para.sentences.length) {
@@ -124,6 +133,7 @@
     skipBack() {
       const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx, playback } = state.get();
       if (pIdx === null) return;
+      log.debug(`skipBack from p${pIdx}:s${sIdx}:w${wIdx}, playback=${playback}`);
       let newPIdx = pIdx, newSIdx = sIdx;
       if (wIdx < 2) {
         newSIdx = sIdx - 1;
@@ -146,6 +156,7 @@
       });
     },
     setSpeed(speed) {
+      log.debug(`setSpeed(${speed})`);
       tts.setSpeed(speed);
       state.dispatch({ speed, totalDurationSec: totalWords / (speed * WORDS_PER_SEC) });
     },
