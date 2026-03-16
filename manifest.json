@@ -17,7 +17,7 @@
     },
     "default_title": "Pocket Speechify"
   },
-  "permissions": ["offscreen"],
+  "permissions": ["offscreen", "storage"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },

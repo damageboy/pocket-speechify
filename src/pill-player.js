@@ -120,12 +120,24 @@ function createSkipButtons(actions) {
   return skipRow;
 }
 
-export function initPillPlayer(shadow, state, actions, paragraphs) {
+export async function initPillPlayer(shadow, state, actions, paragraphs) {
   const hasContent = paragraphs.length > 0;
+
+  // --- Persisted settings ---
+  const SETTINGS_KEY = 'pocket-speechify-settings';
+  const DEFAULT_SETTINGS = { scale: 1.0 };
+  const stored = await chrome.storage.local.get(SETTINGS_KEY);
+  const settings = { ...DEFAULT_SETTINGS, ...stored[SETTINGS_KEY] };
+
+  function saveSettings() {
+    console.log('[Pocket Speechify] Settings saved:', settings);
+    chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+  }
 
   // --- Pill container ---
   const pill = document.createElement('div');
   pill.className = 'pill-container';
+  pill.style.setProperty('--pill-scale', settings.scale);
 
   // --- Pill main section ---
   const pillMain = document.createElement('div');
@@ -280,7 +292,7 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     e.stopPropagation();
     console.log('[Pocket Speechify] Settings button clicked');
     const existing = shadow.querySelector('.settings-dialog');
-    if (existing) { existing.remove(); return; }
+    if (existing) { saveSettings(); existing.remove(); return; }
 
     const sections = [
       { key: 'General',             icon: navGeneralIcon },
@@ -317,6 +329,7 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
     closeBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       console.log('[Pocket Speechify] Settings dialog close clicked');
+      saveSettings();
       dialog.remove();
     });
 
@@ -330,7 +343,37 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
 
     function renderContent() {
       contentBody.innerHTML = '';
-      if (active === 'Debug') {
+      if (active === 'General') {
+        const row = document.createElement('div');
+        row.className = 'settings-field-row';
+        const labelRow = document.createElement('div');
+        labelRow.className = 'settings-field-label-row';
+        const labelText = document.createElement('span');
+        labelText.className = 'settings-field-label';
+        labelText.textContent = 'Scale';
+        const valueText = document.createElement('span');
+        valueText.className = 'settings-field-value';
+        valueText.textContent = `${settings.scale.toFixed(1)}×`;
+        labelRow.appendChild(labelText);
+        labelRow.appendChild(valueText);
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'settings-slider';
+        slider.min = '0.5';
+        slider.max = '3.0';
+        slider.step = '0.1';
+        slider.value = String(settings.scale);
+        slider.addEventListener('input', (ev) => {
+          ev.stopPropagation();
+          console.log(`[Pocket Speechify] Scale slider changed to ${ev.target.value}`);
+          settings.scale = parseFloat(ev.target.value);
+          valueText.textContent = `${settings.scale.toFixed(1)}×`;
+          pill.style.setProperty('--pill-scale', settings.scale);
+        });
+        row.appendChild(labelRow);
+        row.appendChild(slider);
+        contentBody.appendChild(row);
+      } else if (active === 'Debug') {
         const desc = document.createElement('p');
         desc.className = 'settings-field-desc';
         desc.textContent = 'Clears the TTS model weights and all downloaded voice files stored in the extension cache (pocket-tts-v1). The model and voices will be re-downloaded on next use.';
