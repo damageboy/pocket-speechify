@@ -54,6 +54,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         lastLoggedBucket.set(key, bucket);
         console.log(`[SW] Download ${msg.asset}${msg.voiceId ? ':' + msg.voiceId : ''}: ${msg.percent}%`);
       }
+    } else if (msg.type === 'tts-elapsed') {
+      // High-frequency — only log at debug level
+      console.debug('[SW] From offscreen:', msg.type);
     } else {
       console.log('[SW] From offscreen:', msg.type, msg);
     }
