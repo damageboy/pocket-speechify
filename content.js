@@ -42,7 +42,10 @@
   });
 
   tts.addEventListener('duration-estimate', (e) => {
-    state.dispatch({ totalDurationSec: e.detail.totalDurationSec });
+    state.dispatch({
+      totalDurationSec: e.detail.totalDurationSec,
+      elapsedOffsetSec: e.detail.elapsedOffsetSec || 0,
+    });
   });
 
   tts.addEventListener('end', () => {

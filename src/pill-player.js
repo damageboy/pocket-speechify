@@ -354,8 +354,9 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
       speedText.textContent = `${current.speed}x`;
     }
 
+    const effectiveElapsed = (current.elapsedOffsetSec || 0) + current.elapsedSec;
     const percent = current.totalDurationSec > 0
-      ? (current.elapsedSec / current.totalDurationSec) * 100
+      ? Math.min(100, (effectiveElapsed / current.totalDurationSec) * 100)
       : 0;
 
     if (current.playback !== prev.playback) {
@@ -370,7 +371,7 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
       }
     } else if (
       (current.playback === 'playing' || current.playback === 'paused') &&
-      (current.elapsedSec !== prev.elapsedSec || current.totalDurationSec !== prev.totalDurationSec)
+      (current.elapsedSec !== prev.elapsedSec || current.totalDurationSec !== prev.totalDurationSec || current.elapsedOffsetSec !== prev.elapsedOffsetSec)
     ) {
       // Progress changed — update only the arc's stroke-dashoffset, no new elements
       const ring = toggleSlot.querySelector('.progress-ring');

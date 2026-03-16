@@ -15,6 +15,7 @@ const INITIAL_STATE = {
   pillExpanded: false,
   totalDurationSec: 0,
   elapsedSec: 0,
+  elapsedOffsetSec: 0,
   modelCached: false,
   voiceCache: buildEmptyVoiceCache(),
   downloadProgress: null,

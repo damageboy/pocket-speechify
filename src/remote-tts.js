@@ -60,16 +60,38 @@ export class RemoteTTS extends EventTarget {
       }
     }
 
-    // Estimate total duration from word counts across all sentences
-    // Formula per sentence: ceil((numWords / 3 + 2) * 12.5) frames / 12.5 fps
-    let totalEstimatedSec = 0;
-    for (const entry of this.#indexMap) {
-      const frames = Math.ceil((entry.words.length / 3 + 2) * 12.5);
-      totalEstimatedSec += frames / 12.5;
+    // Estimate full article duration + skipped portion for progress ring
+    function estimateSentenceSec(words) {
+      return Math.ceil((words.length / 3 + 2) * 12.5) / 12.5;
     }
-    // Adjust for speed
+
+    // Duration of content we'll play (from play point onwards)
+    let remainingEstimatedSec = 0;
+    for (const entry of this.#indexMap) {
+      remainingEstimatedSec += estimateSentenceSec(entry.words);
+    }
+
+    // Duration of content before the play point (skipped)
+    let skippedSec = 0;
+    for (let pIdx = 0; pIdx < fromParagraph; pIdx++) {
+      for (const sent of paragraphs[pIdx].sentences) {
+        skippedSec += estimateSentenceSec(sent.words);
+      }
+    }
+    // Partial paragraph: sentences before startSent in fromParagraph
+    if (fromParagraph < paragraphs.length) {
+      const startSent = this.#findSentenceForWord(paragraphs[fromParagraph], fromWord);
+      for (let sIdx = 0; sIdx < startSent; sIdx++) {
+        skippedSec += estimateSentenceSec(paragraphs[fromParagraph].sentences[sIdx].words);
+      }
+    }
+
+    const fullArticleSec = skippedSec + remainingEstimatedSec;
     this.dispatchEvent(new CustomEvent('duration-estimate', {
-      detail: { totalDurationSec: totalEstimatedSec / speed },
+      detail: {
+        totalDurationSec: fullArticleSec / speed,
+        elapsedOffsetSec: skippedSec / speed,
+      },
     }));
 
     this.#currentEntryIdx = 0;
