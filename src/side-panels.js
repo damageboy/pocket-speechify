@@ -1,5 +1,5 @@
 import { closeIcon, searchIcon } from './icons.js';
-import { VOICES } from './voices.js';
+import { VOICES, getVoiceAvatarUrl } from './voices.js';
 
 // ============================================================
 // HELPERS
@@ -230,9 +230,11 @@ function createVoicePanel(state) {
 
       const avatar = document.createElement('div');
       avatar.className = 'voice-avatar';
-      avatar.style.background = avatarColor(voice.name);
       avatar.style.position = 'relative';
-      avatar.textContent = voice.name.charAt(0).toUpperCase();
+      const avatarImg = document.createElement('img');
+      avatarImg.src = getVoiceAvatarUrl(voice.id);
+      avatarImg.style.cssText = 'width: 100%; height: 100%; border-radius: 50%; object-fit: cover;';
+      avatar.appendChild(avatarImg);
 
       const cacheStatus = state.get().voiceCache[voice.id] || 'uncached';
       if (cacheStatus === 'uncached') {

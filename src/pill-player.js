@@ -1,4 +1,5 @@
 import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, trashIcon, reportIcon, libraryIcon, settingsIcon, upgradeIcon, turnOffIcon } from './icons.js';
+import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
   const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
@@ -188,13 +189,13 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
   const voiceBtn = document.createElement('button');
   voiceBtn.className = 'btn btn-32 btn-standard';
   voiceBtn.setAttribute('aria-label', 'Voice');
-  // Placeholder avatar: 26px circle with accent-blue background and "S" text
-  const voiceCircle = document.createElement('span');
-  voiceCircle.style.cssText = 'width: 26px; height: 26px; border-radius: 50%; background: var(--accent-blue); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; pointer-events: none;';
-  voiceCircle.textContent = 'S';
-  voiceBtn.appendChild(voiceCircle);
+  const voiceImg = document.createElement('img');
+  voiceImg.style.cssText = 'width: 26px; height: 26px; border-radius: 50%; object-fit: cover; pointer-events: none;';
+  voiceImg.src = getVoiceAvatarUrl(initState.voiceId);
+  voiceBtn.appendChild(voiceImg);
   voiceBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[Pocket Speechify] Voice button clicked');
     state.dispatch({ panelOpen: state.get().panelOpen === 'voice' ? null : 'voice' });
   });
   pillMain.appendChild(voiceBtn);
@@ -321,6 +322,11 @@ export function initPillPlayer(shadow, state, actions, paragraphs) {
       const dur = formatDuration(current.totalDurationSec, current.elapsedSec);
       minsSpan.textContent = dur.mins;
       secsSpan.textContent = dur.secs;
+    }
+
+    // Update voice avatar when voice changes
+    if (current.voiceId !== prev.voiceId) {
+      voiceImg.src = getVoiceAvatarUrl(current.voiceId);
     }
 
     // Show download progress as circular ring around play button
