@@ -11,6 +11,7 @@ const MAX_BUFFERED_SEC = 5; // don't generate more than 5s ahead of playback
 let audioCtx = null;
 let worker = null;
 let currentGenId = -1;
+let internalGenCounter = 0; // offscreen-owned monotonic counter, sent to worker instead of content script's genId
 let currentSpeed = 1.0;
 let paused = false;
 let currentLoadedVoiceId = null;
@@ -184,9 +185,9 @@ function getBufferedAheadSec() {
   return Math.max(0, nextStartTime - ctx.currentTime);
 }
 
-function enqueueChunk(data, genId) {
-  if (genId !== currentGenId) return;
-  audioQueue.push({ data, genId });
+function enqueueChunk(data, workerGenId) {
+  if (workerGenId !== internalGenCounter) return;
+  audioQueue.push({ data, workerGenId });
   // Scheduler will pick it up
 }
 
@@ -214,8 +215,8 @@ function drainQueue() {
   // Schedule chunks from queue while we have room
   while (audioQueue.length > 0 && getBufferedAheadSec() < MAX_BUFFERED_SEC) {
     const entry = audioQueue.shift();
-    if (entry.genId !== currentGenId) continue;
-    scheduleOneChunk(entry.data, entry.genId);
+    if (entry.workerGenId !== internalGenCounter) continue;
+    scheduleOneChunk(entry.data);
   }
 
   // If worker is waiting for queue space, signal it can continue
@@ -225,7 +226,7 @@ function drainQueue() {
   }
 }
 
-function scheduleOneChunk(float32Data, genId) {
+function scheduleOneChunk(float32Data) {
   const ctx = getAudioContext();
   const buffer = ctx.createBuffer(1, float32Data.length, SAMPLE_RATE);
   buffer.getChannelData(0).set(float32Data);
@@ -242,7 +243,8 @@ function scheduleOneChunk(float32Data, genId) {
   const playDurationSec = rawDurationSec / currentSpeed;
   const endTime = nextStartTime + playDurationSec;
 
-  scheduledSources.push({ source, startTime: nextStartTime, endTime, rawDuration: rawDurationSec, genId });
+  const myInternalGen = internalGenCounter;
+  scheduledSources.push({ source, startTime: nextStartTime, endTime, rawDuration: rawDurationSec });
   cumulativeScheduledSec += rawDurationSec;
   sentenceAudioSec += rawDurationSec;
   nextStartTime = endTime;
@@ -251,13 +253,14 @@ function scheduleOneChunk(float32Data, genId) {
   if (wordTimingEstimator && currentSentenceMeta) {
     const events = wordTimingEstimator.feedAudioDuration(sentenceAudioSec);
     for (const evt of events) {
-      // Schedule word event relative to sentence start on AudioContext timeline
       const calibratedTime = evt.estimatedTimeSec * timingCalibrationFactor;
       const wordPlayTime = sentenceStartCtxTime + (calibratedTime / currentSpeed);
       const delay = Math.max(0, wordPlayTime - ctx.currentTime);
+      // Use currentGenId for content-script-facing messages (tab-specific)
+      const csGenId = currentGenId;
       const wordEvent = {
         type: 'tts-word',
-        genId,
+        genId: csGenId,
         detail: {
           paragraphIndex: currentSentenceMeta.paragraphIndex,
           sentenceIndex: currentSentenceMeta.sentenceIndex,
@@ -266,8 +269,7 @@ function scheduleOneChunk(float32Data, genId) {
         },
       };
       const tid = setTimeout(() => {
-        // Don't emit word events if paused or generation changed
-        if (genId !== currentGenId || paused) return;
+        if (myInternalGen !== internalGenCounter || paused) return;
         sendToServiceWorker(wordEvent);
       }, delay * 1000);
       pendingWordTimeouts.push(tid);
@@ -277,7 +279,7 @@ function scheduleOneChunk(float32Data, genId) {
   // Elapsed time update (only when not paused)
   if (!paused) {
     sendToServiceWorker({
-      type: 'tts-elapsed', genId, elapsedSec: cumulativeScheduledSec / currentSpeed,
+      type: 'tts-elapsed', genId: currentGenId, elapsedSec: cumulativeScheduledSec / currentSpeed,
     });
   }
 }
@@ -301,7 +303,7 @@ function checkBackpressure() {
 
 // --- Cancel ---
 
-function cancelGeneration(genId) {
+function cancelGeneration(internalGen) {
   for (const { source } of scheduledSources) {
     try { source.stop(); source.disconnect(); } catch (_) {}
   }
@@ -319,7 +321,7 @@ function cancelGeneration(genId) {
   stopScheduler();
 
   if (worker) {
-    worker.postMessage({ type: 'cancel', genId });
+    worker.postMessage({ type: 'cancel', genId: internalGen });
   }
 }
 
@@ -343,7 +345,8 @@ chrome.runtime.onMessage.addListener((msg) => {
       handleResume();
       break;
     case 'tts-cancel':
-      cancelGeneration(msg.genId);
+      internalGenCounter++;
+      cancelGeneration(internalGenCounter - 1);
       currentGenId = msg.genId;
       break;
     case 'tts-set-speed':
@@ -365,7 +368,8 @@ async function handlePlay(msg) {
 
   const isNewGeneration = genId > currentGenId || msg.tabId !== currentTabId;
   if (isNewGeneration) {
-    cancelGeneration(currentGenId);
+    internalGenCounter++;
+    cancelGeneration(internalGenCounter - 1);
   }
   currentTabId = msg.tabId;
   // Clear pending word events from previous sentence to prevent stale highlights
@@ -457,8 +461,9 @@ async function handlePlay(msg) {
   // Start the audio scheduler
   startScheduler();
 
-  worker.postMessage({ type: 'generate', genId, text, voiceId });
-  logToSW('[Offscreen] Generate message sent to worker');
+  // Use internalGenCounter for worker (not content script's genId — those aren't unique across tabs)
+  worker.postMessage({ type: 'generate', genId: internalGenCounter, text, voiceId });
+  logToSW(`[Offscreen] Generate sent to worker: internalGen=${internalGenCounter}`);
 }
 
 async function ensureWorker(modelData, voiceData, voiceId) {
@@ -521,8 +526,8 @@ function handleWorkerMessage(msg) {
       break;
     }
     case 'done': {
-      logToSW(`[Offscreen] Worker done for genId: ${msg.genId}`);
-      if (msg.genId !== currentGenId) return;
+      logToSW(`[Offscreen] Worker done for genId: ${msg.genId} (internal=${internalGenCounter})`);
+      if (msg.genId !== internalGenCounter) return;
 
       // Finalize word timing — schedule remaining words before sentence end
       if (wordTimingEstimator && currentSentenceMeta) {
@@ -542,8 +547,9 @@ function handleWorkerMessage(msg) {
               word: evt.word,
             },
           };
+          const myGen = internalGenCounter;
           const tid = setTimeout(() => {
-            if (currentGenId !== msg.genId || paused) return;
+            if (myGen !== internalGenCounter || paused) return;
             sendToServiceWorker(wordEvent);
           }, delay * 1000);
           pendingWordTimeouts.push(tid);
@@ -552,9 +558,9 @@ function handleWorkerMessage(msg) {
 
       // Signal sentence done — wait until audio actually finishes playing.
       // Use a polling approach so pause correctly delays the transition.
-      const sentenceDoneGenId = msg.genId;
+      const doneInternalGen = internalGenCounter;
       function checkSentenceDone() {
-        if (currentGenId !== sentenceDoneGenId) return; // cancelled
+        if (doneInternalGen !== internalGenCounter) return; // cancelled
         if (paused) {
           // Re-check after a bit — pause delays sentence transition
           setTimeout(checkSentenceDone, 100);
@@ -563,7 +569,7 @@ function handleWorkerMessage(msg) {
         const now = getAudioContext().currentTime;
         if (now >= nextStartTime - 0.05) {
           // Audio finished playing
-          sendToServiceWorker({ type: 'tts-sentence-done', genId: sentenceDoneGenId });
+          sendToServiceWorker({ type: 'tts-sentence-done', genId: currentGenId });
         } else {
           // Still playing — check again
           setTimeout(checkSentenceDone, Math.max(50, (nextStartTime - now) * 500));
