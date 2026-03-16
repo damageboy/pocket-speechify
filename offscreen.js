@@ -5,21 +5,31 @@ const CACHE_NAME = 'pocket-tts-v1';
 const SAMPLE_RATE = 24000;
 const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 
+// --- Audio queue config ---
+const MAX_BUFFERED_SEC = 5; // don't generate more than 5s ahead of playback
+
 let audioCtx = null;
 let worker = null;
 let currentGenId = -1;
-let nextStartTime = 0;
-let playbackStartTime = 0;
-let scheduledSources = [];
-let cumulativeAudioSec = 0;
 let currentSpeed = 1.0;
 let paused = false;
-let deferredEvents = [];
-let currentSentenceMeta = null;
-let wordTimingEstimator = null;
 let currentLoadedVoiceId = null;
 
-// --- AudioContext ---
+// --- Audio Queue ---
+// Chunks from the worker go into this queue. A scheduler drains it into AudioContext.
+// Word events fire based on AudioContext playback time, not generation time.
+
+let audioQueue = [];         // [{ data: Float32Array, genId, sentenceMeta, words }]
+let scheduledSources = [];   // [{ source, startTime, endTime, genId }]
+let nextStartTime = 0;
+let playbackStartTime = 0;
+let cumulativeScheduledSec = 0; // total raw audio seconds scheduled on AudioContext
+let schedulerTimer = null;
+
+// Per-sentence word timing state
+let currentSentenceMeta = null;
+let wordTimingEstimator = null;
+let sentenceAudioSec = 0;    // raw audio seconds scheduled for current sentence
 
 function getAudioContext() {
   if (!audioCtx) {
@@ -28,14 +38,18 @@ function getAudioContext() {
   return audioCtx;
 }
 
-// --- Outbound messages (always tagged with source: 'offscreen') ---
+// --- Outbound messages ---
 
 function sendToServiceWorker(msg) {
   chrome.runtime.sendMessage({ ...msg, source: 'offscreen' });
 }
 
+function logToSW(message) {
+  console.log(message);
+  sendToServiceWorker({ type: 'diag', message });
+}
+
 // --- Cache API helpers ---
-// Cache API requires URL-like keys. We use a fake https URL as the key.
 function cacheUrl(key) {
   return `https://pocket-tts-cache.local/${key}`;
 }
@@ -49,8 +63,7 @@ async function getCached(key) {
 
 async function putCache(key, data) {
   const cache = await caches.open(CACHE_NAME);
-  const req = new Request(cacheUrl(key));
-  await cache.put(req, new Response(data));
+  await cache.put(new Request(cacheUrl(key)), new Response(data));
 }
 
 async function deleteCache(key) {
@@ -64,7 +77,6 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
   const partialKey = cacheKey + '.partial';
   const metaKey = cacheKey + '.partial-meta';
 
-  // Check for partial download
   let startByte = 0;
   let existingChunks = [];
   const metaResp = await getCached(metaKey);
@@ -80,18 +92,14 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
   }
 
   const headers = {};
-  if (startByte > 0) {
-    headers['Range'] = `bytes=${startByte}-`;
-  }
+  if (startByte > 0) headers['Range'] = `bytes=${startByte}-`;
 
   const resp = await fetch(url, { headers });
   if (!resp.ok && resp.status !== 206) {
     throw new Error(`Download failed: ${resp.status} ${resp.statusText}`);
   }
 
-  const contentLength = startByte + parseInt(
-    resp.headers.get('content-length') || '0', 10
-  );
+  const contentLength = startByte + parseInt(resp.headers.get('content-length') || '0', 10);
   const reader = resp.body.getReader();
   const chunks = [...existingChunks];
   let received = startByte;
@@ -106,37 +114,34 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
       received += value.length;
       const percent = contentLength > 0 ? Math.round((received / contentLength) * 100) : -1;
 
-      // Throttle progress IPC to every 2% to avoid flooding the message bus
       const progressBucket = Math.floor(percent / 2);
       if (progressBucket > lastProgressBucket) {
         lastProgressBucket = progressBucket;
         sendToServiceWorker({ type: 'download-progress', asset, voiceId, percent });
       }
 
-      // Checkpoint partial data every 10% so progress survives offscreen doc being killed
       const checkpointBucket = Math.floor(percent / 10);
       if (checkpointBucket > lastCheckpointBucket) {
         lastCheckpointBucket = checkpointBucket;
         const partial = mergeChunks(chunks, received);
         await putCache(partialKey, partial.buffer);
         await putCache(metaKey, new TextEncoder().encode(JSON.stringify({ received })).buffer);
-        logToSW(`[Offscreen] Checkpoint saved at ${percent}% (${(received / 1024 / 1024).toFixed(1)}MB)`);
+        logToSW(`[Offscreen] Checkpoint at ${percent}% (${(received / 1024 / 1024).toFixed(1)}MB)`);
       }
     }
   } catch (err) {
     const partial = mergeChunks(chunks, received);
     await putCache(partialKey, partial.buffer);
     await putCache(metaKey, new TextEncoder().encode(JSON.stringify({ received })).buffer);
-    logToSW(`[Offscreen] Download interrupted at ${(received / 1024 / 1024).toFixed(1)}MB. Will resume on next attempt.`);
+    logToSW(`[Offscreen] Download interrupted at ${(received / 1024 / 1024).toFixed(1)}MB. Will resume.`);
     throw err;
   }
 
-  // Download complete — store final data, clean up partial
   const fullBuffer = mergeChunks(chunks, received);
   await putCache(cacheKey, fullBuffer.buffer);
   await deleteCache(partialKey);
   await deleteCache(metaKey);
-  console.log(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} cached (${(received / 1024 / 1024).toFixed(1)}MB). No re-download needed on next use.`);
+  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} cached (${(received / 1024 / 1024).toFixed(1)}MB)`);
   sendToServiceWorker({ type: 'download-complete', asset, voiceId });
   return fullBuffer.buffer;
 }
@@ -151,11 +156,66 @@ function mergeChunks(chunks, totalBytes) {
   return result;
 }
 
-// --- Audio scheduling ---
+// =================================================================
+// AUDIO QUEUE & SCHEDULER
+// =================================================================
+//
+// Flow: Worker generates chunks → enqueued in audioQueue
+//       Scheduler drains queue → schedules on AudioContext
+//       Word events fire synced to AudioContext.currentTime
+//       Queue has bounded size → natural backpressure on worker
+//
+// The scheduler runs on a 50ms interval when playing.
+// It schedules chunks from the queue onto AudioContext, keeping
+// the buffer ~MAX_BUFFERED_SEC ahead of current playback position.
 
-function scheduleAudioChunk(float32Data, genId) {
+function getBufferedAheadSec() {
+  const ctx = getAudioContext();
+  return Math.max(0, nextStartTime - ctx.currentTime);
+}
+
+function enqueueChunk(data, genId) {
   if (genId !== currentGenId) return;
+  audioQueue.push({ data, genId });
+  // Scheduler will pick it up
+}
 
+function startScheduler() {
+  if (schedulerTimer) return;
+  schedulerTimer = setInterval(drainQueue, 50);
+}
+
+function stopScheduler() {
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer);
+    schedulerTimer = null;
+  }
+}
+
+function drainQueue() {
+  if (paused) return;
+
+  const ctx = getAudioContext();
+
+  // Clean up finished sources
+  const now = ctx.currentTime;
+  scheduledSources = scheduledSources.filter(s => s.endTime > now);
+
+  // Schedule chunks from queue while we have room
+  while (audioQueue.length > 0 && getBufferedAheadSec() < MAX_BUFFERED_SEC) {
+    const entry = audioQueue.shift();
+    if (entry.genId !== currentGenId) continue;
+    scheduleOneChunk(entry.data, entry.genId);
+  }
+
+  // If worker is waiting for queue space, signal it can continue
+  if (audioQueue.length < 10 && workerWaiting) {
+    workerWaiting = false;
+    worker.postMessage({ type: 'resume-generation' });
+  }
+}
+
+function scheduleOneChunk(float32Data, genId) {
   const ctx = getAudioContext();
   const buffer = ctx.createBuffer(1, float32Data.length, SAMPLE_RATE);
   buffer.getChannelData(0).set(float32Data);
@@ -170,15 +230,20 @@ function scheduleAudioChunk(float32Data, genId) {
 
   const rawDurationSec = float32Data.length / SAMPLE_RATE;
   const playDurationSec = rawDurationSec / currentSpeed;
+  const endTime = nextStartTime + playDurationSec;
 
-  scheduledSources.push({ source, startTime: nextStartTime, rawDuration: rawDurationSec });
-  cumulativeAudioSec += rawDurationSec;
-  nextStartTime += playDurationSec;
+  scheduledSources.push({ source, startTime: nextStartTime, endTime, rawDuration: rawDurationSec, genId });
+  cumulativeScheduledSec += rawDurationSec;
+  sentenceAudioSec += rawDurationSec;
+  nextStartTime = endTime;
 
-  // Run word timing estimator
+  // Word timing: emit events synced to AudioContext playback time
   if (wordTimingEstimator && currentSentenceMeta) {
-    const events = wordTimingEstimator.feedAudioDuration(cumulativeAudioSec);
+    const events = wordTimingEstimator.feedAudioDuration(sentenceAudioSec);
     for (const evt of events) {
+      // Schedule word event to fire when AudioContext reaches this point
+      const wordPlayTime = endTime - playDurationSec + (evt.estimatedTimeSec / currentSpeed);
+      const delay = Math.max(0, wordPlayTime - ctx.currentTime);
       const wordEvent = {
         type: 'tts-word',
         genId,
@@ -189,49 +254,56 @@ function scheduleAudioChunk(float32Data, genId) {
           word: evt.word,
         },
       };
-      const playTime = playbackStartTime + (evt.estimatedTimeSec / currentSpeed);
-      scheduleWordEvent(wordEvent, playTime);
+      setTimeout(() => {
+        if (genId === currentGenId && !paused) {
+          sendToServiceWorker(wordEvent);
+        }
+      }, delay * 1000);
     }
   }
 
-  // Send elapsed time update
+  // Elapsed time update
   sendToServiceWorker({
-    type: 'tts-elapsed', genId, elapsedSec: cumulativeAudioSec / currentSpeed,
+    type: 'tts-elapsed', genId, elapsedSec: cumulativeScheduledSec / currentSpeed,
   });
 }
 
-function scheduleWordEvent(wordEvent, audioCtxTime) {
-  if (paused) {
-    deferredEvents.push({ wordEvent, audioCtxTime });
-    return;
+// --- Backpressure: signal worker to pause/resume ---
+let workerWaiting = false;
+
+function checkBackpressure() {
+  // If queue + scheduled buffer is too far ahead, tell worker to pause
+  const totalBuffered = getBufferedAheadSec() + (audioQueue.length * 0.08); // ~0.08s per chunk
+  if (totalBuffered > MAX_BUFFERED_SEC && !workerWaiting) {
+    workerWaiting = true;
+    worker.postMessage({ type: 'pause-generation' });
   }
-  const ctx = getAudioContext();
-  const delay = Math.max(0, audioCtxTime - ctx.currentTime);
-  setTimeout(() => {
-    sendToServiceWorker(wordEvent);
-  }, delay * 1000);
 }
 
 // --- Cancel ---
 
 function cancelGeneration(genId) {
+  // Stop all scheduled audio
   for (const { source } of scheduledSources) {
     try { source.stop(); source.disconnect(); } catch (_) {}
   }
   scheduledSources = [];
+  audioQueue = [];
   nextStartTime = 0;
   playbackStartTime = 0;
-  cumulativeAudioSec = 0;
-  deferredEvents = [];
+  cumulativeScheduledSec = 0;
+  sentenceAudioSec = 0;
   wordTimingEstimator = null;
   currentSentenceMeta = null;
+  workerWaiting = false;
+  stopScheduler();
 
   if (worker) {
     worker.postMessage({ type: 'cancel', genId });
   }
 }
 
-// --- Message handling (only process messages from service worker) ---
+// --- Message handling ---
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || !msg.type || msg.source !== 'service-worker') return;
@@ -260,20 +332,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     case 'tts-clear-cache':
       caches.delete(CACHE_NAME).then(deleted => {
         logToSW(`[Offscreen] Cache cleared: ${deleted}`);
-        // Kill the worker so model gets reloaded from scratch
-        if (worker) {
-          worker.terminate();
-          worker = null;
-        }
+        if (worker) { worker.terminate(); worker = null; }
+        currentLoadedVoiceId = null;
       });
       break;
   }
 });
-
-function logToSW(message) {
-  console.log(message);
-  sendToServiceWorker({ type: 'diag', message });
-}
 
 async function handlePlay(msg) {
   const { genId, text, voiceId, speed, sentenceMeta } = msg;
@@ -286,19 +350,23 @@ async function handlePlay(msg) {
   currentGenId = genId;
   currentSpeed = speed;
   currentSentenceMeta = sentenceMeta;
+  sentenceAudioSec = 0; // reset per-sentence audio counter
   paused = false;
 
   const ctx = getAudioContext();
   if (ctx.state === 'suspended') await ctx.resume();
 
   if (isNewGeneration) {
-    // Fresh start — reset audio timeline
-    cumulativeAudioSec = 0;
+    cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
   }
-  // Continuation (same genId) — keep nextStartTime so new audio chains
-  // after the previous sentence's scheduled audio
+
+  // Initialize word timing estimator for this sentence
+  const numWords = sentenceMeta.words.length;
+  const estimatedFrames = Math.ceil((numWords / 3 + 2) * 12.5);
+  const estimatedDurationSec = estimatedFrames / 12.5;
+  wordTimingEstimator = createWordTimingEstimator(sentenceMeta.words, estimatedDurationSec);
 
   // Ensure model + voice are downloaded
   const modelKey = `${CACHE_NAME}/model/tts_b6369a24.safetensors`;
@@ -317,32 +385,26 @@ async function handlePlay(msg) {
 
   let voiceData = await getCached(voiceKey);
   if (!voiceData) {
-    console.log(`[Offscreen] Voice ${voiceId} not cached, downloading...`);
+    logToSW(`[Offscreen] Voice ${voiceId} not cached, downloading...`);
     voiceData = await downloadWithProgress(
       `${HF_BASE}/embeddings/${voiceId}.safetensors`, voiceKey, 'voice', voiceId,
     );
-    console.log(`[Offscreen] Voice ${voiceId} download complete`);
+    logToSW(`[Offscreen] Voice ${voiceId} download complete`);
   } else {
-    console.log(`[Offscreen] Voice ${voiceId} loaded from cache`);
+    logToSW(`[Offscreen] Voice ${voiceId} loaded from cache`);
   }
 
-  // Initialize word timing estimator
-  const numWords = sentenceMeta.words.length;
-  const estimatedFrames = Math.ceil((numWords / 3 + 2) * 12.5);
-  const estimatedDurationSec = estimatedFrames / 12.5;
-  wordTimingEstimator = createWordTimingEstimator(sentenceMeta.words, estimatedDurationSec);
-
   // Ensure worker has model + voice loaded
-  logToSW('[Offscreen] Loading model + voice into WASM worker...');
   await ensureWorker(modelData, voiceData, voiceId);
-  logToSW('[Offscreen] Worker ready. Starting generation...');
 
-  // Only reset timing if this was a new generation (first sentence after play/skip)
-  // For continuation sentences, nextStartTime already points past the previous sentence's audio
+  // Reset timing after potentially long download (only for new generation)
   if (isNewGeneration) {
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
   }
+
+  // Start the audio scheduler
+  startScheduler();
 
   worker.postMessage({ type: 'generate', genId, text, voiceId });
   logToSW('[Offscreen] Generate message sent to worker');
@@ -356,8 +418,6 @@ async function ensureWorker(modelData, voiceData, voiceId) {
       logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
     };
 
-    // Fetch config and WASM glue URL here — workers can't access chrome.runtime
-    // Tokenizer is NOT needed — the WASM binary has tokenizer.json embedded via include_bytes!
     const cfgResp = await fetch(chrome.runtime.getURL('config.yaml'));
     const configData = await cfgResp.arrayBuffer();
     const wasmJsUrl = chrome.runtime.getURL('wasm/pocket_tts.js');
@@ -369,7 +429,6 @@ async function ensureWorker(modelData, voiceData, voiceId) {
     await waitForWorkerMessage('model-ready');
   }
 
-  // WASM model stores a single voice state — only reload if voice changed
   if (currentLoadedVoiceId !== voiceId) {
     worker.postMessage({ type: 'load-voice', voiceId, voiceData });
     await waitForWorkerMessage('voice-ready');
@@ -399,7 +458,6 @@ function waitForWorkerMessage(expectedType, timeoutMs = 30000) {
 }
 
 function handleWorkerMessage(msg) {
-  // Forward worker diagnostics to service worker so they appear in its console
   if (msg.type === 'diag') {
     console.log('[Worker]', msg.message);
     sendToServiceWorker({ type: 'diag', message: msg.message });
@@ -407,16 +465,21 @@ function handleWorkerMessage(msg) {
   }
   switch (msg.type) {
     case 'chunk': {
-      scheduleAudioChunk(msg.data, msg.genId);
+      enqueueChunk(msg.data, msg.genId);
+      checkBackpressure();
       break;
     }
     case 'done': {
-      logToSW(`[Offscreen] Generation done for genId: ${msg.genId}`);
+      logToSW(`[Offscreen] Worker done for genId: ${msg.genId}`);
       if (msg.genId !== currentGenId) return;
+
+      // Finalize word timing — remaining words will fire as audio plays
       if (wordTimingEstimator) {
         const remaining = wordTimingEstimator.finalize();
+        const ctx = getAudioContext();
         for (const evt of remaining) {
-          sendToServiceWorker({
+          const delay = Math.max(0, nextStartTime - ctx.currentTime - 0.1);
+          const wordEvent = {
             type: 'tts-word',
             genId: currentGenId,
             detail: {
@@ -425,10 +488,21 @@ function handleWorkerMessage(msg) {
               wordIndex: evt.wordIndex,
               word: evt.word,
             },
-          });
+          };
+          setTimeout(() => {
+            if (currentGenId === msg.genId) sendToServiceWorker(wordEvent);
+          }, delay * 1000);
         }
       }
-      sendToServiceWorker({ type: 'tts-sentence-done', genId: currentGenId });
+
+      // Signal sentence done — but wait until audio actually finishes playing
+      const ctx = getAudioContext();
+      const delayUntilAudioDone = Math.max(0, (nextStartTime - ctx.currentTime) * 1000);
+      setTimeout(() => {
+        if (currentGenId === msg.genId) {
+          sendToServiceWorker({ type: 'tts-sentence-done', genId: currentGenId });
+        }
+      }, delayUntilAudioDone);
       break;
     }
     case 'error': {
@@ -443,20 +517,16 @@ function handleWorkerMessage(msg) {
 
 function handlePause() {
   paused = true;
+  stopScheduler();
   getAudioContext().suspend();
+  // Worker can keep generating into the queue (bounded), but scheduler won't drain it
 }
 
 function handleResume() {
   paused = false;
   const ctx = getAudioContext();
   ctx.resume();
-
-  // Re-schedule deferred word events with corrected timing
-  for (const { wordEvent, audioCtxTime } of deferredEvents) {
-    const delay = Math.max(0, audioCtxTime - ctx.currentTime);
-    setTimeout(() => sendToServiceWorker(wordEvent), delay * 1000);
-  }
-  deferredEvents = [];
+  startScheduler(); // resume draining queue
 }
 
 function handleSetSpeed(newSpeed) {
@@ -464,12 +534,11 @@ function handleSetSpeed(newSpeed) {
   currentSpeed = newSpeed;
   const ctx = getAudioContext();
 
-  // Update playbackRate on all scheduled sources
   for (const entry of scheduledSources) {
     try { entry.source.playbackRate.value = newSpeed; } catch (_) {}
   }
 
-  // Recalculate nextStartTime
+  // Recalculate nextStartTime based on remaining scheduled audio
   const now = ctx.currentTime;
   let lastEndTime = now;
   for (const entry of scheduledSources) {

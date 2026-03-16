@@ -11,6 +11,7 @@ let model = null;
 let sampleRate = 24000;
 let cancelledGenId = -1;
 let activeStreamToken = 0;
+let generationPaused = false;
 
 function diag(m) {
   console.log(m);
@@ -82,6 +83,7 @@ self.onmessage = async (e) => {
 
     case 'generate': {
       try {
+        generationPaused = false;
         activeStreamToken++;
         await runGeneration(msg.genId, msg.text, activeStreamToken);
       } catch (err) {
@@ -94,6 +96,16 @@ self.onmessage = async (e) => {
     case 'cancel': {
       cancelledGenId = Math.max(cancelledGenId, msg.genId);
       activeStreamToken++;
+      break;
+    }
+
+    case 'pause-generation': {
+      generationPaused = true;
+      break;
+    }
+
+    case 'resume-generation': {
+      generationPaused = false;
       break;
     }
   }
@@ -143,9 +155,13 @@ async function runGeneration(genId, text, streamToken) {
     );
     chunkCount++;
 
-    // Yield to event loop every 6 chunks (matching official implementation)
+    // Yield to event loop every 6 chunks for cancellation + backpressure
     if (chunkCount % 6 === 0) {
       await sleep(0);
+      // Wait while paused by backpressure (queue full)
+      while (generationPaused && streamToken === activeStreamToken) {
+        await sleep(50);
+      }
     }
   }
 
