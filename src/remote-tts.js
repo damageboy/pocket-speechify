@@ -1,5 +1,6 @@
 // src/remote-tts.js
 import { DEFAULT_VOICE_ID } from './voices.js';
+import { MockTTS } from './mock-tts.js';
 
 /**
  * Drop-in replacement for MockTTS. Same EventTarget API, same events.
@@ -13,9 +14,19 @@ export class RemoteTTS extends EventTarget {
   #voiceId = DEFAULT_VOICE_ID;
   #paragraphs = null;
   #listener = null;
+  #fallback = null;
 
   constructor() {
     super();
+    this.#fallback = null;
+
+    // Test WASM availability
+    if (typeof WebAssembly === 'undefined') {
+      console.warn('[Pocket Speechify] WebAssembly not available, using simulated playback');
+      this.#useFallback();
+      return;
+    }
+
     this.#listener = (msg) => this.#handleMessage(msg);
     chrome.runtime.onMessage.addListener(this.#listener);
   }
@@ -26,6 +37,10 @@ export class RemoteTTS extends EventTarget {
    * Also estimates totalDurationSec from word counts and dispatches it via 'duration-estimate' event.
    */
   play(paragraphs, fromParagraph = 0, fromWord = 0, speed = 1.0) {
+    if (this.#fallback) {
+      this.#fallback.play(paragraphs, fromParagraph, fromWord, speed);
+      return;
+    }
     this.#paragraphs = paragraphs;
     this.#speed = speed;
     this.#genId++;
@@ -62,14 +77,26 @@ export class RemoteTTS extends EventTarget {
   }
 
   pause() {
+    if (this.#fallback) {
+      this.#fallback.pause();
+      return;
+    }
     chrome.runtime.sendMessage({ type: 'tts-pause', source: 'content' });
   }
 
   resume() {
+    if (this.#fallback) {
+      this.#fallback.resume();
+      return;
+    }
     chrome.runtime.sendMessage({ type: 'tts-resume', source: 'content' });
   }
 
   stop() {
+    if (this.#fallback) {
+      this.#fallback.stop();
+      return;
+    }
     // Send cancel with the CURRENT genId (the one we want to cancel),
     // then increment so future messages with old genId are ignored.
     chrome.runtime.sendMessage({ type: 'tts-cancel', genId: this.#genId, source: 'content' });
@@ -77,6 +104,10 @@ export class RemoteTTS extends EventTarget {
   }
 
   setSpeed(speed) {
+    if (this.#fallback) {
+      this.#fallback.setSpeed(speed);
+      return;
+    }
     this.#speed = speed;
     chrome.runtime.sendMessage({ type: 'tts-set-speed', speed, source: 'content' });
   }
@@ -91,6 +122,15 @@ export class RemoteTTS extends EventTarget {
   }
 
   // --- Private ---
+
+  #useFallback() {
+    this.#fallback = new MockTTS();
+    for (const evtType of ['word', 'sentence', 'paragraph', 'end']) {
+      this.#fallback.addEventListener(evtType, (e) => {
+        this.dispatchEvent(new CustomEvent(e.type, { detail: e.detail }));
+      });
+    }
+  }
 
   #findSentenceForWord(para, fromWord) {
     let wordCount = 0;
