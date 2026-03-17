@@ -34,7 +34,7 @@ STAGING=$(mktemp -d)
 trap "rm -rf $STAGING" EXIT
 
 cp manifest.json content.js service-worker.js offscreen.html offscreen.js config.yaml tokenizer.model "$STAGING/"
-cp -r src css wasm assets "$STAGING/"
+cp -r src css wasm assets lib "$STAGING/"
 find "$STAGING" -name '.DS_Store' -delete 2>/dev/null || true
 
 # Create .zip
