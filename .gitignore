@@ -9,3 +9,6 @@ key.pem
 # Dev tools
 .playwright-mcp/
 trace.json.gz
+
+# Superpowers docs (agent-generated specs/plans)
+docs/superpowers/
