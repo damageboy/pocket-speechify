@@ -73,12 +73,36 @@ Then load the directory as an unpacked extension.
 
 ## Architecture
 
-```
-Content Script          Service Worker         Offscreen Document        TTS Worker
-──────────────          ──────────────         ──────────────────        ──────────
-UI (pill, panels)  ──►  Message router    ──►  Model + voice cache       WASM inference
-Word highlighting  ◄──  (chrome.runtime)  ◄──  AudioContext + scheduler  Streaming chunks
-                                               Signalsmith Stretch
+```mermaid
+flowchart LR
+    subgraph Page["Web Page"]
+        CS["**Content Script**\nPill player UI\nWord highlighting\nHover player"]
+    end
+
+    subgraph SW["Service Worker"]
+        SWR["**Message Router**\nchrome.runtime"]
+    end
+
+    subgraph OD["Offscreen Document"]
+        Cache["Model & voice cache\nCache API"]
+        Sched["AudioContext\nscheduler"]
+        Stretch["Signalsmith Stretch\nWASM · direct mode"]
+        Cache --> Sched
+        Sched --> Stretch
+    end
+
+    subgraph TW["TTS Worker"]
+        WASM["**pocket-tts WASM**\nStreaming inference\nAudio chunks"]
+    end
+
+    CS -- "tts-play / pause\nset-speed" --> SWR
+    SWR -- "tts-word\nsentence-done\nelapsed" --> CS
+
+    SWR -- "forward" --> OD
+    OD -- "tts-word\nsentence-done" --> SWR
+
+    OD -- "generate\ncancel" --> TW
+    TW -- "audio chunks" --> OD
 ```
 
 - **Content script** — injects the pill player UI into pages via shadow DOM, handles highlighting
