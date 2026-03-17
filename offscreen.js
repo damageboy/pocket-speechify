@@ -1,46 +1,51 @@
 // offscreen.js
 import { createWordTimingEstimator } from './src/word-timing-estimator.js';
+import SignalsmithStretchModule from './lib/signalsmith-stretch/SignalsmithStretchModule.mjs';
+import { createStretchProcessor } from './src/stretch-processor.js';
 
 const CACHE_NAME = 'pocket-tts-v1';
 const SAMPLE_RATE = 24000;
 const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 
-// --- Audio queue config ---
+// --- Audio pipeline config ---
 const MAX_BUFFERED_SEC = 5; // don't generate more than 5s ahead of playback
 
 let audioCtx = null;
 let worker = null;
 let currentGenId = -1;
-let internalGenCounter = 0; // offscreen-owned monotonic counter, sent to worker instead of content script's genId
+let internalGenCounter = 0;
 let currentSpeed = 1.0;
 let paused = false;
 let currentLoadedVoiceId = null;
 let currentTabId = null;
 
-// --- Audio Queue ---
-// Chunks from the worker go into this queue. A scheduler drains it into AudioContext.
-// Word events fire based on AudioContext playback time, not generation time.
+// --- Direct WASM stretch processor ---
+// Matches the Rust ssstretch::Stretch pattern: process(input, inputLen, output, outputLen)
+// Each chunk is time-stretched offline, then scheduled at 1.0x playbackRate.
+let stretchProcessor = null;
 
-let audioQueue = [];         // [{ data: Float32Array, genId, sentenceMeta, words }]
-let scheduledSources = [];   // [{ source, startTime, endTime, genId }]
+// --- Audio Queue & Scheduler ---
+let audioQueue = [];         // [{ data: Float32Array, workerGenId }]
+let scheduledSources = [];   // [{ source, startTime, endTime, rawDuration }]
 let nextStartTime = 0;
 let playbackStartTime = 0;
-let cumulativeScheduledSec = 0; // total raw audio seconds scheduled on AudioContext
+let cumulativeScheduledSec = 0;
 let schedulerTimer = null;
 
 // Per-sentence word timing state
 let currentSentenceMeta = null;
 let wordTimingEstimator = null;
-let sentenceAudioSec = 0;    // raw audio seconds scheduled for current sentence
-let pendingWordTimeouts = []; // timeout IDs for pending word events — cleared on sentence transition
-let sentenceStartCtxTime = 0; // AudioContext.currentTime when this sentence's audio started scheduling
+let sentenceAudioSec = 0;
+let pendingWordTimeouts = [];
+let sentenceStartCtxTime = 0;
 
-// Auto-regulation: calibrate word timing estimates from actual sentence durations.
-// Tracks cumulative estimated vs actual across ALL sentences in a generation.
-// calibrationFactor = totalActual / totalEstimated (converges as more data accumulates)
+// Auto-regulation calibration
 let totalEstimatedSec = 0;
 let totalActualSec = 0;
 let timingCalibrationFactor = 1.0;
+
+// Backpressure
+let workerWaiting = false;
 
 function getAudioContext() {
   if (!audioCtx) {
@@ -171,14 +176,12 @@ function mergeChunks(chunks, totalBytes) {
 // AUDIO QUEUE & SCHEDULER
 // =================================================================
 //
-// Flow: Worker generates chunks → enqueued in audioQueue
-//       Scheduler drains queue → schedules on AudioContext
-//       Word events fire synced to AudioContext.currentTime
-//       Queue has bounded size → natural backpressure on worker
+// Flow: Worker generates chunks → stretch-processor time-stretches each chunk
+//       → stretched audio scheduled as AudioBufferSource at 1.0x playbackRate
+//       → destination
 //
-// The scheduler runs on a 50ms interval when playing.
-// It schedules chunks from the queue onto AudioContext, keeping
-// the buffer ~MAX_BUFFERED_SEC ahead of current playback position.
+// This matches the Rust ssstretch pattern: process(input, inputLen, output, outputLen)
+// where outputLen = inputLen / speed. Pitch is naturally preserved by the STFT.
 
 function getBufferedAheadSec() {
   const ctx = getAudioContext();
@@ -188,7 +191,6 @@ function getBufferedAheadSec() {
 function enqueueChunk(data, workerGenId) {
   if (workerGenId !== internalGenCounter) return;
   audioQueue.push({ data, workerGenId });
-  // Scheduler will pick it up
 }
 
 function startScheduler() {
@@ -207,19 +209,15 @@ function drainQueue() {
   if (paused) return;
 
   const ctx = getAudioContext();
-
-  // Clean up finished sources
   const now = ctx.currentTime;
   scheduledSources = scheduledSources.filter(s => s.endTime > now);
 
-  // Schedule chunks from queue while we have room
   while (audioQueue.length > 0 && getBufferedAheadSec() < MAX_BUFFERED_SEC) {
     const entry = audioQueue.shift();
     if (entry.workerGenId !== internalGenCounter) continue;
     scheduleOneChunk(entry.data);
   }
 
-  // If worker is waiting for queue space, signal it can continue
   if (audioQueue.length < 10 && workerWaiting) {
     workerWaiting = false;
     worker.postMessage({ type: 'resume-generation' });
@@ -228,19 +226,29 @@ function drainQueue() {
 
 function scheduleOneChunk(float32Data) {
   const ctx = getAudioContext();
-  const buffer = ctx.createBuffer(1, float32Data.length, SAMPLE_RATE);
-  buffer.getChannelData(0).set(float32Data);
+
+  // Time-stretch the chunk: inputLen → outputLen = inputLen / speed
+  // At speed=1.0 this is a no-op (outputLen == inputLen).
+  const rawDurationSec = float32Data.length / SAMPLE_RATE;
+  let stretchedData;
+  if (stretchProcessor && Math.abs(currentSpeed - 1.0) > 0.001) {
+    stretchedData = stretchProcessor.process(float32Data, currentSpeed);
+  } else {
+    stretchedData = float32Data;
+  }
+
+  const buffer = ctx.createBuffer(1, stretchedData.length, SAMPLE_RATE);
+  buffer.getChannelData(0).set(stretchedData);
 
   const source = ctx.createBufferSource();
   source.buffer = buffer;
-  source.playbackRate.value = currentSpeed;
+  // playbackRate is always 1.0 — speed change is in the stretched data
   source.connect(ctx.destination);
 
   nextStartTime = Math.max(nextStartTime, ctx.currentTime);
   source.start(nextStartTime);
 
-  const rawDurationSec = float32Data.length / SAMPLE_RATE;
-  const playDurationSec = rawDurationSec / currentSpeed;
+  const playDurationSec = stretchedData.length / SAMPLE_RATE;
   const endTime = nextStartTime + playDurationSec;
 
   const myInternalGen = internalGenCounter;
@@ -256,7 +264,6 @@ function scheduleOneChunk(float32Data) {
       const calibratedTime = evt.estimatedTimeSec * timingCalibrationFactor;
       const wordPlayTime = sentenceStartCtxTime + (calibratedTime / currentSpeed);
       const delay = Math.max(0, wordPlayTime - ctx.currentTime);
-      // Use currentGenId for content-script-facing messages (tab-specific)
       const csGenId = currentGenId;
       const wordEvent = {
         type: 'tts-word',
@@ -276,7 +283,6 @@ function scheduleOneChunk(float32Data) {
     }
   }
 
-  // Elapsed time update (only when not paused)
   if (!paused) {
     sendToServiceWorker({
       type: 'tts-elapsed', genId: currentGenId, elapsedSec: cumulativeScheduledSec / currentSpeed,
@@ -289,12 +295,8 @@ function clearPendingWordEvents() {
   pendingWordTimeouts = [];
 }
 
-// --- Backpressure: signal worker to pause/resume ---
-let workerWaiting = false;
-
 function checkBackpressure() {
-  // If queue + scheduled buffer is too far ahead, tell worker to pause
-  const totalBuffered = getBufferedAheadSec() + (audioQueue.length * 0.08); // ~0.08s per chunk
+  const totalBuffered = getBufferedAheadSec() + (audioQueue.length * 0.08);
   if (totalBuffered > MAX_BUFFERED_SEC && !workerWaiting) {
     workerWaiting = true;
     worker.postMessage({ type: 'pause-generation' });
@@ -372,10 +374,9 @@ async function handlePlay(msg) {
     cancelGeneration(internalGenCounter - 1);
   }
   currentTabId = msg.tabId;
-  // Clear pending word events from previous sentence to prevent stale highlights
   clearPendingWordEvents();
 
-  // Auto-regulate: accumulate actual vs estimated duration from previous sentence
+  // Auto-regulate calibration from previous sentence
   if (!isNewGeneration && sentenceAudioSec > 0 && currentSentenceMeta) {
     const numWords = currentSentenceMeta.words?.length || 1;
     const estimatedFrames = Math.ceil((numWords / 3 + 2) * 12.5);
@@ -384,7 +385,7 @@ async function handlePlay(msg) {
     totalActualSec += sentenceAudioSec;
     if (totalEstimatedSec > 0) {
       timingCalibrationFactor = totalActualSec / totalEstimatedSec;
-      logToSW(`[Offscreen] Timing calibration: sentence est=${estimatedSec.toFixed(2)}s actual=${sentenceAudioSec.toFixed(2)}s | cumulative factor=${timingCalibrationFactor.toFixed(3)} (${totalActualSec.toFixed(1)}s/${totalEstimatedSec.toFixed(1)}s)`);
+      logToSW(`[Offscreen] Timing calibration: factor=${timingCalibrationFactor.toFixed(3)}`);
     }
   }
 
@@ -396,7 +397,6 @@ async function handlePlay(msg) {
   const ctx = getAudioContext();
 
   if (isNewGeneration) {
-    // Only unpause on explicit new play — not on sentence continuation
     paused = false;
     if (ctx.state === 'suspended') await ctx.resume();
     cumulativeScheduledSec = 0;
@@ -407,17 +407,9 @@ async function handlePlay(msg) {
     timingCalibrationFactor = 1.0;
   }
 
-  // If paused, don't proceed — the sentence will be generated into the queue
-  // and played when the user resumes
-  if (paused) {
-    logToSW('[Offscreen] Paused — queueing sentence for later playback');
-    // Still set up the word timing estimator so it's ready when we resume
-  }
-
-  // Record when this sentence's audio starts on the AudioContext timeline
   sentenceStartCtxTime = nextStartTime;
 
-  // Initialize word timing estimator for this sentence
+  // Initialize word timing estimator
   const numWords = sentenceMeta.words.length;
   const estimatedFrames = Math.ceil((numWords / 3 + 2) * 12.5);
   const estimatedDurationSec = estimatedFrames / 12.5;
@@ -452,16 +444,20 @@ async function handlePlay(msg) {
   // Ensure worker has model + voice loaded
   await ensureWorker(modelData, voiceData, voiceId);
 
-  // Reset timing after potentially long download (only for new generation)
+  // Ensure stretch processor is initialized
+  if (!stretchProcessor) {
+    stretchProcessor = await createStretchProcessor(SignalsmithStretchModule, SAMPLE_RATE, 1);
+    logToSW('[Offscreen] StretchProcessor initialized (direct WASM)');
+  }
+
+  // Reset timing after potentially long download
   if (isNewGeneration) {
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
   }
 
-  // Start the audio scheduler
   startScheduler();
 
-  // Use internalGenCounter for worker (not content script's genId — those aren't unique across tabs)
   worker.postMessage({ type: 'generate', genId: internalGenCounter, text, voiceId });
   logToSW(`[Offscreen] Generate sent to worker: internalGen=${internalGenCounter}`);
 }
@@ -529,7 +525,7 @@ function handleWorkerMessage(msg) {
       logToSW(`[Offscreen] Worker done for genId: ${msg.genId} (internal=${internalGenCounter})`);
       if (msg.genId !== internalGenCounter) return;
 
-      // Finalize word timing — schedule remaining words before sentence end
+      // Finalize word timing
       if (wordTimingEstimator && currentSentenceMeta) {
         const remaining = wordTimingEstimator.finalize();
         const ctx = getAudioContext();
@@ -556,22 +552,18 @@ function handleWorkerMessage(msg) {
         }
       }
 
-      // Signal sentence done — wait until audio actually finishes playing.
-      // Use a polling approach so pause correctly delays the transition.
+      // Wait for audio to finish playing
       const doneInternalGen = internalGenCounter;
       function checkSentenceDone() {
-        if (doneInternalGen !== internalGenCounter) return; // cancelled
+        if (doneInternalGen !== internalGenCounter) return;
         if (paused) {
-          // Re-check after a bit — pause delays sentence transition
           setTimeout(checkSentenceDone, 100);
           return;
         }
         const now = getAudioContext().currentTime;
         if (now >= nextStartTime - 0.05) {
-          // Audio finished playing
           sendToServiceWorker({ type: 'tts-sentence-done', genId: currentGenId });
         } else {
-          // Still playing — check again
           setTimeout(checkSentenceDone, Math.max(50, (nextStartTime - now) * 500));
         }
       }
@@ -592,14 +584,13 @@ function handlePause() {
   paused = true;
   stopScheduler();
   getAudioContext().suspend();
-  // Worker can keep generating into the queue (bounded), but scheduler won't drain it
 }
 
 function handleResume() {
   paused = false;
   const ctx = getAudioContext();
   ctx.resume();
-  startScheduler(); // resume draining queue
+  startScheduler();
 }
 
 function handleSetSpeed(newSpeed) {
@@ -607,20 +598,12 @@ function handleSetSpeed(newSpeed) {
   currentSpeed = newSpeed;
   const ctx = getAudioContext();
 
-  for (const entry of scheduledSources) {
-    try { entry.source.playbackRate.value = newSpeed; } catch (_) {}
-  }
+  // Future chunks will be stretched at the new speed.
+  // Already-scheduled sources play at 1.0x with their already-stretched data.
+  // No playbackRate changes needed — the stretching is baked into the audio data.
+  logToSW(`[Offscreen] Speed changed to ${newSpeed}x (takes effect on next chunk)`);
 
-  // Recalculate nextStartTime based on remaining scheduled audio
-  const now = ctx.currentTime;
-  let lastEndTime = now;
-  for (const entry of scheduledSources) {
-    const elapsed = Math.max(0, now - entry.startTime);
-    const originalPlayDuration = entry.rawDuration / oldSpeed;
-    const remaining = Math.max(0, originalPlayDuration - elapsed);
-    const newRemaining = remaining * (oldSpeed / newSpeed);
-    const newEnd = now + newRemaining;
-    if (newEnd > lastEndTime) lastEndTime = newEnd;
-  }
-  nextStartTime = lastEndTime;
+  // Note: for already-buffered-but-not-yet-scheduled chunks in audioQueue,
+  // they'll be stretched at the new speed when drainQueue processes them.
+  // This gives near-instant speed changes for buffered audio.
 }

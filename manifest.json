@@ -34,7 +34,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model", "config.yaml", "assets/*"],
+      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model", "config.yaml", "assets/*", "lib/signalsmith-stretch/*.js"],
       "matches": ["<all_urls>"]
     }
   ]
