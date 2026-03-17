@@ -16,6 +16,7 @@
   --bg-primary-dark: #121212;
   --text-tertiary: #7a7a7a;
   --accent-blue: #5c6ae5;
+  --electric-blue: #8894fe;
   --pill-shadow:
     0px 0px 0px 0px rgba(106, 120, 252, 0.5),
     0px 0px 2px 0px rgba(106, 120, 252, 0.49),
@@ -615,11 +616,16 @@
   width: 100%;
   -webkit-appearance: none;
   appearance: none;
+  height: 16px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.speed-slider::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
   background: var(--bg-divider);
-  outline: none;
-  cursor: pointer;
 }
 
 .speed-slider::-webkit-slider-thumb {
@@ -632,6 +638,7 @@
   border: 2px solid var(--text-secondary);
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  margin-top: -6px;
 }
 
 .speed-slider::-moz-range-thumb {
@@ -1009,11 +1016,16 @@
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
+  height: 16px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
   background: var(--bg-divider);
-  outline: none;
-  cursor: pointer;
 }
 
 .settings-slider::-webkit-slider-thumb {
@@ -1025,6 +1037,7 @@
   background: var(--electric-blue);
   cursor: pointer;
   transition: background 0.1s ease;
+  margin-top: -6px;
 }
 
 .settings-slider::-webkit-slider-thumb:hover {

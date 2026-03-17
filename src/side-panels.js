@@ -125,9 +125,10 @@ function createSpeedPanel(state, actions) {
   const slider = document.createElement('input');
   slider.type = 'range';
   slider.className = 'speed-slider';
-  slider.min = '0.4';
-  slider.max = '4.5';
-  slider.step = '0.1';
+  slider.min = 0.4;
+  slider.max = 4.5;
+  slider.step = 0.1;
+  slider.value = state.get().speed;
   slider.style.width = '100%';
   slider.addEventListener('input', () => {
     actions.setSpeed(parseFloat(slider.value));
@@ -147,7 +148,7 @@ function createSpeedPanel(state, actions) {
     const spd = s.speed;
     labelEl.textContent = speedLabel(spd);
     speedValueEl.textContent = `${spd.toFixed(1)}x`;
-    slider.value = String(spd);
+    slider.value = spd;
 
     presetBtns.forEach(btn => {
       const v = parseFloat(btn.dataset.speed);
@@ -315,6 +316,12 @@ export function initSidePanels(shadow, state, actions) {
         speedPanel.style.animation = 'none';
         speedPanel.offsetHeight; // reflow
         speedPanel.style.animation = '';
+        // Force thumb repaint — Chrome doesn't paint ::-webkit-slider-thumb
+        // inside shadow DOM until interaction
+        const v = slider.value;
+        slider.value = 0;
+        void slider.offsetWidth;
+        slider.value = v;
       } else if (current.panelOpen === 'voice') {
         speedPanel.style.display = 'none';
         resetSearch();
