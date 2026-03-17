@@ -594,7 +594,6 @@ function handleResume() {
 }
 
 function handleSetSpeed(newSpeed) {
-  const oldSpeed = currentSpeed;
   currentSpeed = newSpeed;
   const ctx = getAudioContext();
 

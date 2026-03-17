@@ -5,7 +5,7 @@ function formatDuration(totalSec, elapsedSec) {
   const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
-  return { mins: String(mins), secs: String(secs).padStart(2, '0') };
+  return { mins, secs: String(secs).padStart(2, '0') };
 }
 
 // Build download progress button (circular ring with percentage text inside)
@@ -359,10 +359,10 @@ export async function initPillPlayer(shadow, state, actions, paragraphs) {
         const slider = document.createElement('input');
         slider.type = 'range';
         slider.className = 'settings-slider';
-        slider.min = '0.5';
-        slider.max = '3.0';
-        slider.step = '0.1';
-        slider.value = String(settings.scale);
+        slider.min = 0.5;
+        slider.max = 3.0;
+        slider.step = 0.1;
+        slider.value = settings.scale;
         slider.addEventListener('input', (ev) => {
           ev.stopPropagation();
           console.log(`[Pocket Speechify] Scale slider changed to ${ev.target.value}`);
@@ -479,19 +479,18 @@ export async function initPillPlayer(shadow, state, actions, paragraphs) {
 
     // Show download progress as circular ring around play button
     if (current.downloadProgress !== prev.downloadProgress) {
-      while (toggleSlot.firstChild) toggleSlot.removeChild(toggleSlot.firstChild);
       if (current.downloadProgress && current.downloadProgress.percent >= 0) {
-        toggleSlot.appendChild(renderDownloadButton(current.downloadProgress.percent));
+        toggleSlot.replaceChildren(renderDownloadButton(current.downloadProgress.percent));
         skipButtons.style.display = 'none';
       } else if (!current.downloadProgress) {
         // Download done — restore correct play state
         if (current.playback === 'idle') {
-          toggleSlot.appendChild(renderIdlePlayButton(hasContent, actions));
+          toggleSlot.replaceChildren(renderIdlePlayButton(hasContent, actions));
           skipButtons.style.display = 'none';
         } else {
           const pct = current.totalDurationSec > 0
             ? (current.elapsedSec / current.totalDurationSec) * 100 : 0;
-          toggleSlot.appendChild(renderToggleButton(current.playback, pct, actions));
+          toggleSlot.replaceChildren(renderToggleButton(current.playback, pct, actions));
           skipButtons.style.display = '';
         }
       }
@@ -509,12 +508,11 @@ export async function initPillPlayer(shadow, state, actions, paragraphs) {
 
     if (current.playback !== prev.playback) {
       // Playback state changed — rebuild only the toggle slot
-      while (toggleSlot.firstChild) toggleSlot.removeChild(toggleSlot.firstChild);
       if (current.playback === 'idle') {
-        toggleSlot.appendChild(renderIdlePlayButton(hasContent, actions));
+        toggleSlot.replaceChildren(renderIdlePlayButton(hasContent, actions));
         skipButtons.style.display = 'none';
       } else {
-        toggleSlot.appendChild(renderToggleButton(current.playback, percent, actions));
+        toggleSlot.replaceChildren(renderToggleButton(current.playback, percent, actions));
         skipButtons.style.display = '';
       }
     } else if (
@@ -528,7 +526,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs) {
         if (arc) {
           const circumference = 2 * Math.PI * 46;
           const offset = circumference - (percent / 100) * circumference;
-          arc.setAttribute('stroke-dashoffset', `${offset}`);
+          arc.setAttribute('stroke-dashoffset', offset);
         }
       }
     }

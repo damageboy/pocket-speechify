@@ -110,7 +110,6 @@ function createSpeedPanel(state, actions) {
     const btn = document.createElement('button');
     btn.className = 'speed-preset-btn';
     btn.textContent = v === 1 ? '1x' : `${v}x`;
-    btn.dataset.speed = v;
     btn.addEventListener('click', () => actions.setSpeed(v));
     presets.appendChild(btn);
     return btn;
@@ -150,9 +149,8 @@ function createSpeedPanel(state, actions) {
     speedValueEl.textContent = `${spd.toFixed(1)}x`;
     slider.value = spd;
 
-    presetBtns.forEach(btn => {
-      const v = parseFloat(btn.dataset.speed);
-      btn.classList.toggle('active', Math.abs(v - spd) < 0.05);
+    presetBtns.forEach((btn, i) => {
+      btn.classList.toggle('active', Math.abs(presetValues[i] - spd) < 0.05);
     });
 
     const dur = formatDurationFromSpeed(s.totalDurationSec);

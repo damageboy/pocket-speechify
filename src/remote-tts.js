@@ -18,8 +18,6 @@ export class RemoteTTS extends EventTarget {
 
   constructor() {
     super();
-    this.#fallback = null;
-
     // Test WASM availability
     if (typeof WebAssembly === 'undefined') {
       console.warn('[Pocket Speechify] WebAssembly not available, using simulated playback');

@@ -1,3 +1,9 @@
+function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
+  return paragraphs[pIdx].sentences
+    .slice(0, sIdx)
+    .reduce((sum, s) => sum + s.words.length, 0);
+}
+
 (async function initPocketSpeechify() {
   const { log } = await import(chrome.runtime.getURL('src/logger.js'));
 
@@ -124,10 +130,7 @@
         newSIdx = 0;
       }
       if (newPIdx >= paragraphs.length) return;
-      // Compute word offset for target sentence within its paragraph
-      const fromWord = paragraphs[newPIdx].sentences
-        .slice(0, newSIdx)
-        .reduce((sum, s) => sum + s.words.length, 0);
+      const fromWord = wordOffsetForSentence(paragraphs, newPIdx, newSIdx);
       tts.stop();
       state.dispatch({
         currentParagraphIndex: newPIdx,
@@ -152,10 +155,7 @@
           else { newSIdx = paragraphs[newPIdx].sentences.length - 1; }
         }
       }
-      // Compute word offset for target sentence within its paragraph
-      const fromWord = paragraphs[newPIdx].sentences
-        .slice(0, newSIdx)
-        .reduce((sum, s) => sum + s.words.length, 0);
+      const fromWord = wordOffsetForSentence(paragraphs, newPIdx, newSIdx);
       tts.stop();
       state.dispatch({
         currentParagraphIndex: newPIdx,

@@ -85,11 +85,7 @@ export async function createStretchProcessor(ModuleFactory, sampleRate, channels
   }
 
   function destroy() {
-    // No explicit cleanup needed — WASM instance will be GC'd
-    allocatedLen = 0;
-    bufferPointer = 0;
-    buffersIn = [];
-    buffersOut = [];
+    // WASM instance is GC'd with the closure — no explicit cleanup needed
   }
 
   return { process, destroy };
