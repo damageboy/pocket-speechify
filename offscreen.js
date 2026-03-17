@@ -306,8 +306,13 @@ function checkBackpressure() {
 // --- Cancel ---
 
 function cancelGeneration(internalGen) {
+  // Disconnect all scheduled sources. Separate try/catch blocks are critical: if stop()
+  // throws (e.g. InvalidStateError when context is suspended and the source hasn't been
+  // processed by the audio thread yet), disconnect() must still run so the source cannot
+  // produce any output when the context resumes.
   for (const { source } of scheduledSources) {
-    try { source.stop(); source.disconnect(); } catch (_) {}
+    try { source.stop(); } catch (_) {}
+    try { source.disconnect(); } catch (_) {}
   }
   scheduledSources = [];
   audioQueue = [];
@@ -321,6 +326,14 @@ function cancelGeneration(internalGen) {
   currentSentenceMeta = null;
   workerWaiting = false;
   stopScheduler();
+
+  // Close the AudioContext so any in-flight or scheduled audio is immediately destroyed.
+  // A fresh context is created lazily by getAudioContext() on the next play call.
+  if (audioCtx) {
+    const oldCtx = audioCtx;
+    audioCtx = null;
+    oldCtx.close().catch(() => {});
+  }
 
   if (worker) {
     worker.postMessage({ type: 'cancel', genId: internalGen });
@@ -398,7 +411,13 @@ async function handlePlay(msg) {
 
   if (isNewGeneration) {
     paused = false;
+    // cancelGeneration closed the old AudioContext, so ctx is a fresh instance that
+    // starts in "running" state — no resume needed. If for any reason it's suspended
+    // (e.g. browser autoplay policy), resume it.
     if (ctx.state === 'suspended') await ctx.resume();
+    // Reset stretch processor state so Tab A's WASM filter delay lines don't bleed
+    // into the first chunks of the new generation.
+    if (stretchProcessor) stretchProcessor.reset();
     cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;

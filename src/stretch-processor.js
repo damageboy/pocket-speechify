@@ -84,9 +84,15 @@ export async function createStretchProcessor(ModuleFactory, sampleRate, channels
     return result;
   }
 
+  function reset() {
+    // Clear all internal STFT delay-line / overlap-add state by re-running presetDefault.
+    // Call this when starting a new generation to prevent audio bleed from previous audio.
+    wasmModule._presetDefault(channels, sampleRate);
+  }
+
   function destroy() {
     // WASM instance is GC'd with the closure — no explicit cleanup needed
   }
 
-  return { process, destroy };
+  return { process, reset, destroy };
 }
