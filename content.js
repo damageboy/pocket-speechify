@@ -41,7 +41,6 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
   tts.addEventListener('word', (e) => {
     state.dispatch({
       currentParagraphIndex: e.detail.paragraphIndex,
-      currentSentenceIndex: e.detail.sentenceIndex,
       currentWordIndex: e.detail.wordIndex,
     });
   });
@@ -88,9 +87,10 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
   });
 
   tts.addEventListener('sentence', (e) => {
-    const { paragraphIndex, sentenceIndex } = e.detail;
+    const { paragraphIndex, sentenceIndex, text } = e.detail;
+    state.dispatch({ currentSentenceIndex: sentenceIndex });
     ttsHistory.push({
-      text: paragraphs[paragraphIndex].sentences[sentenceIndex].text,
+      text: text || paragraphs[paragraphIndex]?.sentences[sentenceIndex]?.text || '',
       paragraphIndex,
       sentenceIndex,
     });
@@ -152,7 +152,7 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
       state.dispatch({
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
-        currentWordIndex: 0,
+        currentWordIndex: fromWord,
       });
       if (playback === 'playing') {
         state.dispatch({ playback: 'playing' });
@@ -169,7 +169,8 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
       if (pIdx === null) return;
       log.debug(`skipBack from p${pIdx}:s${sIdx}:w${wIdx}`);
       let newPIdx = pIdx, newSIdx = sIdx;
-      if (wIdx < 2) {
+      const sentenceStartWordIdx = wordOffsetForSentence(paragraphs, pIdx, sIdx);
+      if (wIdx - sentenceStartWordIdx < 2) {
         newSIdx = sIdx - 1;
         if (newSIdx < 0) {
           newPIdx = pIdx - 1;
@@ -182,7 +183,7 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
       state.dispatch({
         currentParagraphIndex: newPIdx,
         currentSentenceIndex: newSIdx,
-        currentWordIndex: 0,
+        currentWordIndex: fromWord,
       });
       if (playback === 'playing') {
         state.dispatch({ playback: 'playing' });

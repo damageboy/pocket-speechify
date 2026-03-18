@@ -23,7 +23,8 @@ export function extractContent() {
     if (!text) continue;
     const sentences = splitSentences(text);
     if (sentences.length === 0) continue;
-    paragraphs.push({ element: node, text, sentences });
+    const words = sentences.flatMap(s => s.words);
+    paragraphs.push({ element: node, text, sentences, words });
   }
 
   return paragraphs;

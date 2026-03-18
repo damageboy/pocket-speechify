@@ -40,7 +40,8 @@ function deriveHighlightColors(bgColor) {
 }
 
 function clearHighlights() {
-  document.querySelectorAll('[data-ps-highlight="true"]').forEach(el => el.remove());
+  document.querySelectorAll('[data-ps-highlight]').forEach(el => el.remove());
+  paragraphOverlay = null;
 }
 
 /**
@@ -49,7 +50,7 @@ function clearHighlights() {
  */
 function createOverlay(rect, color) {
   const div = document.createElement('div');
-  div.setAttribute('data-ps-highlight', 'true');
+  div.setAttribute('data-ps-highlight', 'overlay');
   div.style.cssText = [
     'position: absolute',
     `top: ${rect.top + window.scrollY}px`,
@@ -65,8 +66,8 @@ function createOverlay(rect, color) {
   return div;
 }
 
-let lastSentenceKey = null;
-let sentenceOverlays = [];
+let lastParaIdx = null;
+let paragraphOverlay = null;
 let cachedColors = null;
 let cachedColorParaIdx = null;
 
@@ -86,23 +87,19 @@ function onUserScroll() {
 }
 
 function updateHighlights(currentState, paragraphs) {
-  const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = currentState;
+  const { currentParagraphIndex: pIdx, currentWordIndex: wIdx } = currentState;
 
-  if (pIdx === null || sIdx === null || wIdx === null) {
+  if (pIdx === null || wIdx === null) {
     clearHighlights();
-    lastSentenceKey = null;
-    sentenceOverlays = [];
+    lastParaIdx = null;
     return;
   }
 
   const para = paragraphs[pIdx];
-  if (!para) { clearHighlights(); lastSentenceKey = null; sentenceOverlays = []; return; }
+  if (!para) { clearHighlights(); lastParaIdx = null; return; }
 
-  const sentence = para.sentences[sIdx];
-  if (!sentence) { clearHighlights(); lastSentenceKey = null; sentenceOverlays = []; return; }
-
-  const word = sentence.words[wIdx];
-  if (!word) { clearHighlights(); lastSentenceKey = null; sentenceOverlays = []; return; }
+  const word = para.words[wIdx];
+  if (!word) { clearHighlights(); lastParaIdx = null; return; }
 
   // Derive colors from paragraph background (cached per paragraph)
   if (cachedColorParaIdx !== pIdx) {
@@ -112,41 +109,42 @@ function updateHighlights(currentState, paragraphs) {
   }
   const { sentenceColor, wordColor } = cachedColors;
 
-  const sentenceKey = `${pIdx}:${sIdx}`;
-  const sentenceChanged = sentenceKey !== lastSentenceKey;
-
-  if (sentenceChanged) {
+  // Paragraph background overlay — single solid rectangle covering the whole element.
+  // Redrawn only when the paragraph changes.
+  if (lastParaIdx !== pIdx) {
     clearHighlights();
-    sentenceOverlays = [];
-
-    const sentenceStartOffset = sentence.startOffset;
-    const sentenceEndOffset = sentenceStartOffset + sentence.text.length;
-    const sentenceRange = createRangeFromOffsets(para.element, sentenceStartOffset, sentenceEndOffset);
-    const rawRects = Array.from(sentenceRange.getClientRects());
-    const mergedRects = mergeRects(rawRects);
-
-    for (const rect of mergedRects) {
-      if (rect.width > 0 && rect.height > 0) {
-        const overlay = createOverlay(rect, sentenceColor);
-        document.body.appendChild(overlay);
-        sentenceOverlays.push(overlay);
-      }
+    const paraRect = para.element.getBoundingClientRect();
+    if (paraRect.width > 0 && paraRect.height > 0) {
+      paragraphOverlay = document.createElement('div');
+      paragraphOverlay.setAttribute('data-ps-highlight', 'para');
+      paragraphOverlay.style.cssText = [
+        'position: absolute',
+        `top: ${paraRect.top + window.scrollY}px`,
+        `left: ${paraRect.left + window.scrollX}px`,
+        `width: ${paraRect.width}px`,
+        `height: ${paraRect.height}px`,
+        `background-color: ${sentenceColor}`,
+        'pointer-events: none',
+        'border-radius: 0',
+        'z-index: 2147483644',
+        'mix-blend-mode: multiply',
+      ].join('; ');
+      document.body.appendChild(paragraphOverlay);
     }
-    lastSentenceKey = sentenceKey;
+    lastParaIdx = pIdx;
   } else {
-    // Remove only word overlays (those not in sentenceOverlays)
-    document.querySelectorAll('[data-ps-highlight="true"]').forEach(el => {
-      if (!sentenceOverlays.includes(el)) el.remove();
-    });
+    // Remove only word overlays, keep paragraph overlay
+    document.querySelectorAll('[data-ps-highlight="word"]').forEach(el => el.remove());
   }
 
   // Word highlight
   const wordRange = createRangeFromOffsets(para.element, word.startOffset, word.endOffset);
   const wordRect = wordRange.getBoundingClientRect();
   if (wordRect.width > 0 && wordRect.height > 0) {
-    document.body.appendChild(createOverlay(wordRect, wordColor));
+    const overlay = createOverlay(wordRect, wordColor);
+    overlay.setAttribute('data-ps-highlight', 'word');
+    document.body.appendChild(overlay);
 
-    // Auto-scroll only if enabled (user hasn't scrolled away recently)
     if (autoScrollEnabled) {
       const viewportHeight = window.innerHeight;
       if (wordRect.top < -100 || wordRect.bottom > viewportHeight + 100) {
@@ -203,8 +201,7 @@ export function initHighlights(state, paragraphs) {
   state.subscribe((current, prev) => {
     if (current.playback === 'idle' && prev.playback !== 'idle') {
       clearHighlights();
-      lastSentenceKey = null;
-      sentenceOverlays = [];
+      lastParaIdx = null;
       cachedColorParaIdx = null;
       autoScrollEnabled = true;
       return;
@@ -212,7 +209,6 @@ export function initHighlights(state, paragraphs) {
     if (current.playback === 'playing' || current.playback === 'paused') {
       if (
         current.currentWordIndex !== prev.currentWordIndex ||
-        current.currentSentenceIndex !== prev.currentSentenceIndex ||
         current.currentParagraphIndex !== prev.currentParagraphIndex
       ) {
         updateHighlights(current, paragraphs);

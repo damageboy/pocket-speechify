@@ -5,10 +5,14 @@ import { MockTTS } from './mock-tts.js';
 /**
  * Drop-in replacement for MockTTS. Same EventTarget API, same events.
  * Communicates with the service worker → offscreen document → WASM worker pipeline.
+ *
+ * Sends one paragraph at a time to the offscreen document, which normalizes the full
+ * paragraph text before splitting into sentences. This ensures abbreviations like "Dr."
+ * and numeric patterns are not incorrectly used as sentence boundaries.
  */
 export class RemoteTTS extends EventTarget {
   #genId = 0;
-  #indexMap = []; // [{ paragraphIndex, sentenceIndex, words, text }]
+  #indexMap = []; // [{ paragraphIndex, startSentenceIndex, para }]
   #currentEntryIdx = 0;
   #speed = 1.0;
   #voiceId = DEFAULT_VOICE_ID;
@@ -31,8 +35,8 @@ export class RemoteTTS extends EventTarget {
 
   /**
    * Start playback from a given paragraph/word position.
-   * Flattens paragraph structure into per-sentence segments and builds index map.
-   * Also estimates totalDurationSec from word counts and dispatches it via 'duration-estimate' event.
+   * Builds a paragraph-level index map and sends paragraphs one at a time to offscreen.
+   * The offscreen document normalizes each paragraph before sentence splitting.
    */
   play(paragraphs, fromParagraph = 0, fromWord = 0, speed = 1.0) {
     if (this.#fallback) {
@@ -43,19 +47,12 @@ export class RemoteTTS extends EventTarget {
     this.#speed = speed;
     this.#genId++;
 
-    // Build index map: ordered list of sentences from the starting position
+    // Build index map: one entry per paragraph from the starting position
     this.#indexMap = [];
     for (let pIdx = fromParagraph; pIdx < paragraphs.length; pIdx++) {
       const para = paragraphs[pIdx];
       const startSent = (pIdx === fromParagraph) ? this.#findSentenceForWord(para, fromWord) : 0;
-      for (let sIdx = startSent; sIdx < para.sentences.length; sIdx++) {
-        this.#indexMap.push({
-          paragraphIndex: pIdx,
-          sentenceIndex: sIdx,
-          words: para.sentences[sIdx].words,
-          text: para.sentences[sIdx].text,
-        });
-      }
+      this.#indexMap.push({ paragraphIndex: pIdx, startSentenceIndex: startSent, para });
     }
 
     // Estimate full article duration + skipped portion for progress ring
@@ -63,20 +60,19 @@ export class RemoteTTS extends EventTarget {
       return Math.ceil((words.length / 3 + 2) * 12.5) / 12.5;
     }
 
-    // Duration of content we'll play (from play point onwards)
     let remainingEstimatedSec = 0;
     for (const entry of this.#indexMap) {
-      remainingEstimatedSec += estimateSentenceSec(entry.words);
+      for (const sent of entry.para.sentences) {
+        remainingEstimatedSec += estimateSentenceSec(sent.words);
+      }
     }
 
-    // Duration of content before the play point (skipped)
     let skippedSec = 0;
     for (let pIdx = 0; pIdx < fromParagraph; pIdx++) {
       for (const sent of paragraphs[pIdx].sentences) {
         skippedSec += estimateSentenceSec(sent.words);
       }
     }
-    // Partial paragraph: sentences before startSent in fromParagraph
     if (fromParagraph < paragraphs.length) {
       const startSent = this.#findSentenceForWord(paragraphs[fromParagraph], fromWord);
       for (let sIdx = 0; sIdx < startSent; sIdx++) {
@@ -93,48 +89,33 @@ export class RemoteTTS extends EventTarget {
     }));
 
     this.#currentEntryIdx = 0;
-    this.#sendCurrentSentence();
+    this.#sendCurrentParagraph();
   }
 
   pause() {
-    if (this.#fallback) {
-      this.#fallback.pause();
-      return;
-    }
+    if (this.#fallback) { this.#fallback.pause(); return; }
     chrome.runtime.sendMessage({ type: 'tts-pause', source: 'content' });
   }
 
   resume() {
-    if (this.#fallback) {
-      this.#fallback.resume();
-      return;
-    }
+    if (this.#fallback) { this.#fallback.resume(); return; }
     chrome.runtime.sendMessage({ type: 'tts-resume', source: 'content' });
   }
 
   stop() {
-    if (this.#fallback) {
-      this.#fallback.stop();
-      return;
-    }
-    // Send cancel with the CURRENT genId (the one we want to cancel),
-    // then increment so future messages with old genId are ignored.
+    if (this.#fallback) { this.#fallback.stop(); return; }
     chrome.runtime.sendMessage({ type: 'tts-cancel', genId: this.#genId, source: 'content' });
     this.#genId++;
   }
 
   setSpeed(speed) {
-    if (this.#fallback) {
-      this.#fallback.setSpeed(speed);
-      return;
-    }
+    if (this.#fallback) { this.#fallback.setSpeed(speed); return; }
     this.#speed = speed;
     chrome.runtime.sendMessage({ type: 'tts-set-speed', speed, source: 'content' });
   }
 
   setVoice(voiceId) {
     this.#voiceId = voiceId;
-    // Voice change takes effect on next sentence (per spec)
   }
 
   // --- Private ---
@@ -157,32 +138,36 @@ export class RemoteTTS extends EventTarget {
     return 0;
   }
 
-  #sendCurrentSentence() {
+  #sendCurrentParagraph() {
     const entry = this.#indexMap[this.#currentEntryIdx];
     if (!entry) {
       this.dispatchEvent(new CustomEvent('end'));
       return;
     }
+    const { para, paragraphIndex, startSentenceIndex } = entry;
+    console.log(`[Pocket Speechify] Sending paragraph ${paragraphIndex} to TTS (startSent=${startSentenceIndex})`);
+    const startParaWordOffset = para.sentences
+      .slice(0, startSentenceIndex)
+      .reduce((sum, s) => sum + s.words.length, 0);
 
     chrome.runtime.sendMessage({
-      type: 'tts-play',
+      type: 'tts-play-paragraph',
       genId: this.#genId,
-      text: entry.text,
-      voiceId: this.#voiceId, // uses current voiceId — may have changed since play()
+      paragraphText: para.text,
+      paragraphIndex,
+      startSentenceIndex,
+      originalSentenceCount: para.sentences.length,
+      originalWordCount: para.words.length,
+      startParaWordOffset,
+      voiceId: this.#voiceId,
       speed: this.#speed,
       source: 'content',
-      sentenceMeta: {
-        paragraphIndex: entry.paragraphIndex,
-        sentenceIndex: entry.sentenceIndex,
-        words: entry.words,
-      },
     });
   }
 
   #handleMessage(msg) {
     if (!msg || !msg.type) return;
     // Only process messages relayed by service worker (which strips the source field).
-    // Ignore direct broadcasts from service worker or offscreen doc.
     if (msg.source) return;
 
     switch (msg.type) {
@@ -191,7 +176,13 @@ export class RemoteTTS extends EventTarget {
         this.dispatchEvent(new CustomEvent('word', { detail: msg.detail }));
         break;
       }
-      case 'tts-sentence-done': {
+      case 'tts-sentence-event': {
+        // Fired by offscreen for each sentence it starts within a paragraph
+        if (msg.genId !== this.#genId) return;
+        this.dispatchEvent(new CustomEvent('sentence', { detail: msg.detail }));
+        break;
+      }
+      case 'tts-paragraph-done': {
         if (msg.genId !== this.#genId) return;
         this.#currentEntryIdx++;
         const nextEntry = this.#indexMap[this.#currentEntryIdx];
@@ -199,19 +190,10 @@ export class RemoteTTS extends EventTarget {
           this.dispatchEvent(new CustomEvent('end'));
           return;
         }
-        const prevEntry = this.#indexMap[this.#currentEntryIdx - 1];
-        if (nextEntry.paragraphIndex !== prevEntry.paragraphIndex) {
-          this.dispatchEvent(new CustomEvent('paragraph', {
-            detail: { paragraphIndex: nextEntry.paragraphIndex },
-          }));
-        }
-        this.dispatchEvent(new CustomEvent('sentence', {
-          detail: {
-            paragraphIndex: nextEntry.paragraphIndex,
-            sentenceIndex: nextEntry.sentenceIndex,
-          },
+        this.dispatchEvent(new CustomEvent('paragraph', {
+          detail: { paragraphIndex: nextEntry.paragraphIndex },
         }));
-        this.#sendCurrentSentence();
+        this.#sendCurrentParagraph();
         break;
       }
       case 'tts-elapsed': {

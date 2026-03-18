@@ -17,7 +17,10 @@
     },
     "default_title": "Pocket Speechify"
   },
-  "permissions": ["offscreen", "storage"],
+  "permissions": [
+    "offscreen",
+    "storage"
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
@@ -27,15 +30,34 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/*.js", "css/*.css", "wasm/*.js", "wasm/*.wasm", "tokenizer.model", "config.yaml", "assets/*", "lib/signalsmith-stretch/*.js"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "src/*.js",
+        "css/*.css",
+        "wasm/*.js",
+        "wasm/*.wasm",
+        "tokenizer.model",
+        "config.yaml",
+        "assets/*",
+        "lib/signalsmith-stretch/*.js",
+        "lib/text-processing-rs/*.js",
+        "lib/text-processing-rs/*.wasm",
+        "data/abbreviations.json"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
-  ]
+  ],
+  "version_name": "0.2.0-e13f6e0"
 }

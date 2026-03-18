@@ -62,8 +62,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     // Events to broadcast to content scripts
     if (msg.type === 'download-progress' || msg.type === 'download-complete' ||
-        msg.type === 'tts-word' || msg.type === 'tts-sentence-done' ||
-        msg.type === 'tts-elapsed') {
+        msg.type === 'tts-word' || msg.type === 'tts-sentence-event' ||
+        msg.type === 'tts-paragraph-done' || msg.type === 'tts-elapsed') {
       broadcastToContentScripts(msg);
     }
     return;
@@ -82,7 +82,7 @@ async function handleTTSFromContent(msg, tabId) {
   try {
     // Cross-tab download coordination: if a download is already in progress
     // for the same asset, don't start another one
-    if (msg.type === 'tts-play') {
+    if (msg.type === 'tts-play-paragraph') {
       const downloadKey = `download-${msg.voiceId || 'model'}`;
       if (activeDownloads.has(downloadKey)) {
         activeDownloads.get(downloadKey).tabIds.add(tabId);
