@@ -12,3 +12,6 @@ trace.json.gz
 
 # Superpowers docs (agent-generated specs/plans)
 docs/superpowers/
+
+node_modules/
+.output/
