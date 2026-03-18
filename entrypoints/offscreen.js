@@ -1,8 +1,15 @@
 // offscreen.js
-import { createWordTimingEstimator } from './src/word-timing-estimator.js';
-import SignalsmithStretchModule from './lib/signalsmith-stretch/SignalsmithStretchModule.mjs';
-import { createStretchProcessor } from './src/stretch-processor.js';
-import initTextProcessing, { tnNormalizeSentence } from './lib/text-processing-rs/text_processing_rs.js';
+import { createWordTimingEstimator } from '../src/word-timing-estimator.js';
+import { createStretchProcessor } from '../src/stretch-processor.js';
+
+// Signalsmith Stretch — must stay vendored (npm API incompatible).
+// Dynamic import: WASM is embedded in the .mjs, import.meta.url must resolve to public/lib/
+let SignalsmithStretchModule;
+
+// text-processing-rs — must stay dynamic.
+// WASM glue uses import.meta.url to resolve sibling .wasm file.
+// If Vite bundles this statically, import.meta.url points to wrong location → 404.
+let initTextProcessing, tnNormalizeSentence;
 
 const CACHE_NAME = 'pocket-tts-v1';
 const SAMPLE_RATE = 24000;
@@ -55,6 +62,9 @@ let sentenceDoneResolve = null;
 let textProcessingInitialized = false;
 async function ensureTextProcessing() {
   if (textProcessingInitialized) return;
+  const tpModule = await import(browser.runtime.getURL('lib/text-processing-rs/text_processing_rs.js'));
+  initTextProcessing = tpModule.default;
+  tnNormalizeSentence = tpModule.tnNormalizeSentence;
   await initTextProcessing();
   textProcessingInitialized = true;
   logToSW('[Offscreen] text-processing-rs initialized');
@@ -64,7 +74,7 @@ async function ensureTextProcessing() {
 let abbreviations = null;
 async function loadAbbreviations() {
   if (abbreviations !== null) return abbreviations;
-  const resp = await fetch(chrome.runtime.getURL('data/abbreviations.json'));
+  const resp = await fetch(browser.runtime.getURL('data/abbreviations.json'));
   abbreviations = await resp.json();
   logToSW(`[Offscreen] Loaded ${Object.keys(abbreviations).length} abbreviation(s)`);
   return abbreviations;
@@ -120,7 +130,7 @@ function getAudioContext() {
 // --- Outbound messages ---
 
 function sendToServiceWorker(msg) {
-  chrome.runtime.sendMessage({ ...msg, source: 'offscreen' });
+  browser.runtime.sendMessage({ ...msg, source: 'offscreen' });
 }
 
 function logToSW(message) {
@@ -412,7 +422,7 @@ function cancelGeneration(internalGen) {
 
 // --- Message handling ---
 
-chrome.runtime.onMessage.addListener((msg) => {
+browser.runtime.onMessage.addListener((msg) => {
   if (!msg || !msg.type || msg.source !== 'service-worker') return;
   logToSW(`[Offscreen] Received: ${msg.type}`);
 
@@ -504,6 +514,8 @@ async function handlePlayParagraph(msg) {
   await ensureWorker(modelData, voiceData, voiceId);
 
   if (!stretchProcessor) {
+    const ssModule = await import(browser.runtime.getURL('lib/signalsmith-stretch/SignalsmithStretchModule.mjs'));
+    SignalsmithStretchModule = ssModule.default;
     stretchProcessor = await createStretchProcessor(SignalsmithStretchModule, SAMPLE_RATE, 1);
     logToSW('[Offscreen] StretchProcessor initialized (direct WASM)');
   }
@@ -609,15 +621,15 @@ async function handlePlayParagraph(msg) {
 
 async function ensureWorker(modelData, voiceData, voiceId) {
   if (!worker) {
-    worker = new Worker(chrome.runtime.getURL('src/tts-worker.js'));
+    worker = new Worker(browser.runtime.getURL('tts-worker.js'));
     worker.onmessage = (e) => handleWorkerMessage(e.data);
     worker.onerror = (e) => {
       logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
     };
 
-    const cfgResp = await fetch(chrome.runtime.getURL('config.yaml'));
+    const cfgResp = await fetch(browser.runtime.getURL('config.yaml'));
     const configData = await cfgResp.arrayBuffer();
-    const wasmJsUrl = chrome.runtime.getURL('wasm/pocket_tts.js');
+    const wasmJsUrl = browser.runtime.getURL('wasm/pocket_tts.js');
 
     worker.postMessage(
       { type: 'load-model', modelData, configData, wasmJsUrl },
