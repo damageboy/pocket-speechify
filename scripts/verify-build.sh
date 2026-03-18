@@ -20,11 +20,8 @@ check() {
 echo "=== Verifying extension build ==="
 
 # Core files
-check "manifest.json"
-check "content.js"
+check "entrypoints/content.js"
 check "entrypoints/background.js"
-check "offscreen.html"
-check "offscreen.js"
 check "public/config.yaml"
 
 # Source modules
@@ -80,15 +77,9 @@ for voice in alba marius javert jean fantine cosette eponine azelma; do
   check "public/assets/voices/${voice}.webp"
 done
 
-# Validate manifest.json is parseable
-if ! node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))" 2>/dev/null; then
-  echo "ERROR: manifest.json is not valid JSON"
-  ERRORS=$((ERRORS + 1))
-fi
-
 # Check JS files for syntax errors (using node if available)
 if command -v node &>/dev/null; then
-  for js in content.js entrypoints/background.js offscreen.js src/*.js; do
+  for js in entrypoints/content.js entrypoints/background.js src/*.js; do
     if ! node --check "$js" 2>/dev/null; then
       echo "SYNTAX ERROR: $js"
       ERRORS=$((ERRORS + 1))
@@ -96,8 +87,8 @@ if command -v node &>/dev/null; then
   done
 fi
 
-# Check manifest version matches expected
-VERSION=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('manifest.json','utf8')).version)")
+# Check package.json version
+VERSION=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
 echo "Extension version: $VERSION"
 
 # Check WASM binary size (should be > 1MB)
