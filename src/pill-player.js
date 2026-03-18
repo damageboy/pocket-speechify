@@ -1,4 +1,4 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon } from './icons.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon, navHistoryIcon } from './icons.js';
 import { getVoiceAvatarUrl } from './voices.js';
 
 function formatDuration(totalSec, elapsedSec) {
@@ -120,7 +120,7 @@ function createSkipButtons(actions) {
   return skipRow;
 }
 
-export async function initPillPlayer(shadow, state, actions, paragraphs) {
+export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHistory) {
   const hasContent = paragraphs.length > 0;
 
   // --- Persisted settings ---
@@ -300,6 +300,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs) {
       { key: 'Keyboard Shortcuts',  icon: navKeyboardIcon },
       { key: 'Accessibility',       icon: navAccessibilityIcon },
       { key: 'Debug',               icon: navDebugIcon },
+      { key: 'History',             icon: navHistoryIcon },
     ];
     let active = 'General';
 
@@ -397,7 +398,81 @@ export async function initPillPlayer(shadow, state, actions, paragraphs) {
         });
         contentBody.appendChild(desc);
         contentBody.appendChild(btn);
+      } else if (active === 'History') {
+        renderHistoryPanel();
       }
+    }
+
+    function renderHistoryPanel() {
+      // Header row: count + clear button
+      const headerRow = document.createElement('div');
+      headerRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;';
+
+      const countLabel = document.createElement('span');
+      countLabel.className = 'settings-field-label';
+      const entryCount = ttsHistory.length;
+      countLabel.textContent = entryCount === 0
+        ? 'No entries yet'
+        : `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}`;
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'settings-action-btn';
+      clearBtn.textContent = 'Clear History';
+      clearBtn.disabled = entryCount === 0;
+      clearBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        console.log('[Pocket Speechify] Clear History button clicked');
+        ttsHistory.length = 0;
+        active = 'History';
+        renderContent();
+      });
+
+      headerRow.appendChild(countLabel);
+      headerRow.appendChild(clearBtn);
+      contentBody.appendChild(headerRow);
+
+      if (entryCount === 0) return;
+
+      // Scrollable table wrapper
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'max-height: 320px; overflow-y: auto;';
+
+      const table = document.createElement('table');
+      table.style.cssText = 'width: 100%; border-collapse: collapse;';
+
+      // Header
+      const thead = document.createElement('thead');
+      const headerTr = document.createElement('tr');
+      headerTr.style.cssText = 'border-bottom: 1px solid #2e2e2e;';
+      const thNum = document.createElement('th');
+      thNum.textContent = '#';
+      thNum.style.cssText = 'text-align: left; padding: 4px 8px 4px 0; color: #9f9f9f; font-size: 11px; font-weight: 500; width: 28px;';
+      const thText = document.createElement('th');
+      thText.textContent = 'Text';
+      thText.style.cssText = 'text-align: left; padding: 4px 8px; color: #9f9f9f; font-size: 11px; font-weight: 500;';
+      headerTr.appendChild(thNum);
+      headerTr.appendChild(thText);
+      thead.appendChild(headerTr);
+      table.appendChild(thead);
+
+      // Body
+      const tbody = document.createElement('tbody');
+      ttsHistory.forEach((entry, i) => {
+        const tr = document.createElement('tr');
+        tr.style.cssText = `border-bottom: 1px solid #1e1e1e;${i % 2 === 1 ? ' background: #242424;' : ''}`;
+        const tdNum = document.createElement('td');
+        tdNum.textContent = i + 1;
+        tdNum.style.cssText = 'padding: 5px 0 5px 0; color: #9f9f9f; font-size: 11px; width: 28px;';
+        const tdText = document.createElement('td');
+        tdText.textContent = entry.text;
+        tdText.style.cssText = 'padding: 5px 8px; color: #ffffff; font-size: 11px;';
+        tr.appendChild(tdNum);
+        tr.appendChild(tdText);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
+      contentBody.appendChild(wrapper);
     }
 
     function renderNav() {
