@@ -120,7 +120,7 @@ function createSkipButtons(actions) {
   return skipRow;
 }
 
-export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHistory) {
+export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHistory = []) {
   const hasContent = paragraphs.length > 0;
 
   // --- Persisted settings ---
