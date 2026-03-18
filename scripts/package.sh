@@ -33,8 +33,9 @@ rm -f "$ZIP_OUTPUT" "$CRX_OUTPUT"
 STAGING=$(mktemp -d)
 trap "rm -rf $STAGING" EXIT
 
-cp manifest.json content.js service-worker.js offscreen.html offscreen.js config.yaml tokenizer.model "$STAGING/"
-cp -r src css wasm assets lib "$STAGING/"
+# Build with WXT, then stage the output
+npm run build
+cp -r .output/chrome-mv3/* "$STAGING/"
 find "$STAGING" -name '.DS_Store' -delete 2>/dev/null || true
 
 # Create .zip
