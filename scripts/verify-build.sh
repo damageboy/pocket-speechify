@@ -25,7 +25,7 @@ check "content.js"
 check "service-worker.js"
 check "offscreen.html"
 check "offscreen.js"
-check "config.yaml"
+check "public/config.yaml"
 
 # Source modules
 check "src/remote-tts.js"
@@ -42,24 +42,24 @@ check "src/icons.js"
 check "src/dom-utils.js"
 check "src/logger.js"
 check "src/word-timing-estimator.js"
-check "src/tts-worker.js"
+check "public/tts-worker.js"
 
 # CSS
-check "css/player.css"
+check "public/css/player.css"
 
 # WASM artifacts — rebuild if missing
-if [ ! -f "wasm/pocket_tts_bg.wasm" ] || [ ! -f "wasm/pocket_tts.js" ]; then
+if [ ! -f "public/wasm/pocket_tts_bg.wasm" ] || [ ! -f "public/wasm/pocket_tts.js" ]; then
   echo "WASM artifacts missing — attempting rebuild..."
   if command -v cargo &>/dev/null && command -v wasm-pack &>/dev/null; then
     bash scripts/build-wasm.sh
-    if [ ! -f "wasm/pocket_tts_bg.wasm" ]; then
+    if [ ! -f "public/wasm/pocket_tts_bg.wasm" ]; then
       echo "ERROR: WASM rebuild failed"
       ERRORS=$((ERRORS + 1))
     else
       echo "WASM rebuilt successfully"
     fi
   else
-    echo "ERROR: wasm/pocket_tts_bg.wasm missing and cannot rebuild (need cargo + wasm-pack)"
+    echo "ERROR: public/wasm/pocket_tts_bg.wasm missing and cannot rebuild (need cargo + wasm-pack)"
     ERRORS=$((ERRORS + 1))
   fi
 else
@@ -67,17 +67,17 @@ else
 fi
 
 # Tokenizer — download if missing
-if [ ! -f "tokenizer.model" ]; then
-  echo "tokenizer.model missing — downloading..."
-  curl -sL -o tokenizer.model \
+if [ ! -f "public/tokenizer.model" ]; then
+  echo "public/tokenizer.model missing — downloading..."
+  curl -sL -o public/tokenizer.model \
     "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tokenizer.model"
   echo "Downloaded tokenizer.model"
 fi
-check "tokenizer.model"
+check "public/tokenizer.model"
 
 # Voice avatars
 for voice in alba marius javert jean fantine cosette eponine azelma; do
-  check "assets/voices/${voice}.webp"
+  check "public/assets/voices/${voice}.webp"
 done
 
 # Validate manifest.json is parseable
@@ -101,7 +101,7 @@ VERSION=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('m
 echo "Extension version: $VERSION"
 
 # Check WASM binary size (should be > 1MB)
-WASM_SIZE=$(wc -c < wasm/pocket_tts_bg.wasm)
+WASM_SIZE=$(wc -c < public/wasm/pocket_tts_bg.wasm)
 if [ "$WASM_SIZE" -lt 1000000 ]; then
   echo "ERROR: wasm/pocket_tts_bg.wasm is too small ($WASM_SIZE bytes) — may be corrupt"
   ERRORS=$((ERRORS + 1))
