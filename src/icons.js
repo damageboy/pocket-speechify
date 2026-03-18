@@ -218,3 +218,10 @@ export function navDebugIcon() {
     path('M11 13h4.5', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' })
   );
 }
+
+export function navHistoryIcon() {
+  return svg('0 0 20 20',
+    path('M10 3a7 7 0 1 0 0 14A7 7 0 0 0 10 3Z', { stroke: 'currentColor', 'stroke-width': '1.5', fill: 'none' }),
+    path('M10 6.5v4l2.5 1.5', { stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: 'none' })
+  );
+}
