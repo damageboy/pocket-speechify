@@ -22,7 +22,7 @@ echo "=== Verifying extension build ==="
 # Core files
 check "manifest.json"
 check "content.js"
-check "service-worker.js"
+check "entrypoints/background.js"
 check "offscreen.html"
 check "offscreen.js"
 check "public/config.yaml"
@@ -88,7 +88,7 @@ fi
 
 # Check JS files for syntax errors (using node if available)
 if command -v node &>/dev/null; then
-  for js in content.js service-worker.js offscreen.js src/*.js; do
+  for js in content.js entrypoints/background.js offscreen.js src/*.js; do
     if ! node --check "$js" 2>/dev/null; then
       echo "SYNTAX ERROR: $js"
       ERRORS=$((ERRORS + 1))
