@@ -29,6 +29,9 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
   const paragraphs = extractContent();
   log.info(`Extracted ${paragraphs.length} paragraphs`);
 
+  /** @type {{ text: string, paragraphIndex: number, sentenceIndex: number }[]} */
+  const ttsHistory = [];
+
   // totalDurationSec will be estimated by RemoteTTS on play()
 
   const { RemoteTTS } = await import(chrome.runtime.getURL('src/remote-tts.js'));
@@ -84,6 +87,15 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
     }
   });
 
+  tts.addEventListener('sentence', (e) => {
+    const { paragraphIndex, sentenceIndex } = e.detail;
+    ttsHistory.push({
+      text: paragraphs[paragraphIndex].sentences[sentenceIndex].text,
+      paragraphIndex,
+      sentenceIndex,
+    });
+  });
+
   // Wire voiceId state changes to RemoteTTS
   state.subscribe((current, prev) => {
     if (current.voiceId !== prev.voiceId) {
@@ -97,6 +109,11 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
       log.debug(`play(fromParagraph=${fromParagraph}), speed=${state.get().speed}`);
       state.dispatch({ playback: 'playing' });
       tts.play(paragraphs, fromParagraph, 0, state.get().speed);
+      ttsHistory.push({
+        text: paragraphs[fromParagraph].sentences[0].text,
+        paragraphIndex: fromParagraph,
+        sentenceIndex: 0,
+      });
     },
     pause() {
       log.debug('pause');
@@ -139,6 +156,11 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
       });
       if (playback === 'playing') {
         state.dispatch({ playback: 'playing' });
+        ttsHistory.push({
+          text: paragraphs[newPIdx].sentences[newSIdx].text,
+          paragraphIndex: newPIdx,
+          sentenceIndex: newSIdx,
+        });
         tts.play(paragraphs, newPIdx, fromWord, state.get().speed);
       }
     },
@@ -164,6 +186,11 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
       });
       if (playback === 'playing') {
         state.dispatch({ playback: 'playing' });
+        ttsHistory.push({
+          text: paragraphs[newPIdx].sentences[newSIdx].text,
+          paragraphIndex: newPIdx,
+          sentenceIndex: newSIdx,
+        });
         tts.play(paragraphs, newPIdx, fromWord, state.get().speed);
       }
     },
@@ -175,7 +202,7 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
   };
 
   const { initPillPlayer } = await import(chrome.runtime.getURL('src/pill-player.js'));
-  initPillPlayer(shadow, state, actions, paragraphs);
+  initPillPlayer(shadow, state, actions, paragraphs, ttsHistory);
 
   const { initSidePanels } = await import(chrome.runtime.getURL('src/side-panels.js'));
   initSidePanels(shadow, state, actions);
