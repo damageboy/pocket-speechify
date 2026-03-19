@@ -23,5 +23,5 @@ export const DEFAULT_VOICE_ID = 'alba';
  * Works in content scripts and extension pages.
  */
 export function getVoiceAvatarUrl(voiceId) {
-  return (typeof browser !== 'undefined' ? browser : chrome).runtime.getURL(`assets/voices/${voiceId}.webp`);
+  return browser.runtime.getURL(`assets/voices/${voiceId}.webp`);
 }
