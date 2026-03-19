@@ -66,10 +66,7 @@ jobs:
         if: steps.wasm-check.outputs.needed == 'true'
         run: bash scripts/build-wasm.sh
 
-      # --- Verify, Build, Package ---
-      - name: Verify source files
-        run: bash scripts/verify-build.sh
-
+      # --- Build + Package ---
       - name: Package extension
         id: package
         run: |

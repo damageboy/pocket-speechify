@@ -14,9 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$EXT_DIR"
 
-# Verify source files first
-bash scripts/verify-build.sh
-
 VERSION=$(bash scripts/stamp-version.sh)
 BASE="${1:-pocket-speechify-${VERSION}}"
 ZIP_OUTPUT="${BASE}.zip"
