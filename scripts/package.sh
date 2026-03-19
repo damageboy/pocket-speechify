@@ -4,9 +4,9 @@
 #
 # Produces:
 #   pocket-speechify-{version}.zip  — for Chrome Web Store upload
-#   pocket-speechify-{version}.crx  — for direct installation
+#   pocket-speechify-{version}.crx  — for browsers that support direct .crx install
 #
-# The .crx signing key is auto-generated on first run (key.pem).
+# The .crx uses a throwaway key (not for trust, just CRX3 format requirement).
 
 set -euo pipefail
 
@@ -14,10 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$EXT_DIR"
 
-# Verify build first
-bash scripts/verify-build.sh
-
-# Stamp version into manifest
 VERSION=$(bash scripts/stamp-version.sh)
 BASE="${1:-pocket-speechify-${VERSION}}"
 ZIP_OUTPUT="${BASE}.zip"
@@ -29,39 +25,38 @@ echo "=== Packaging extension v${VERSION} ==="
 # Remove stale packages
 rm -f "$ZIP_OUTPUT" "$CRX_OUTPUT"
 
-# Stage extension files into a temp directory for clean packaging
-STAGING=$(mktemp -d)
-trap "rm -rf $STAGING" EXIT
-
-cp manifest.json content.js service-worker.js offscreen.html offscreen.js config.yaml tokenizer.model "$STAGING/"
-cp -r src css wasm assets lib "$STAGING/"
-find "$STAGING" -name '.DS_Store' -delete 2>/dev/null || true
-
-# Create .zip
-(cd "$STAGING" && zip -r "$EXT_DIR/$ZIP_OUTPUT" .)
+# Build + zip via WXT
+npx wxt zip 2>&1
+# WXT outputs to .output/pocket-speechify-{version}-chrome.zip
+WXT_ZIP=$(ls .output/*-chrome.zip 2>/dev/null | head -1)
+if [ -z "$WXT_ZIP" ]; then
+  echo "ERROR: wxt zip did not produce output"
+  exit 1
+fi
+mv "$WXT_ZIP" "$ZIP_OUTPUT"
 
 ZIP_SIZE=$(wc -c < "$ZIP_OUTPUT" | tr -d ' ')
 ZIP_MB=$(echo "scale=1; $ZIP_SIZE / 1048576" | bc)
 echo "Created: $ZIP_OUTPUT (${ZIP_MB}MB)"
 
-# Create .crx (requires npx crx3 or chrome CLI)
+# Create .crx from the built extension directory
+# CRX3 format requires a key — use a throwaway one
 if command -v npx &>/dev/null; then
-  # Generate signing key if it doesn't exist
   KEY_FILE="$EXT_DIR/key.pem"
   if [ ! -f "$KEY_FILE" ]; then
     openssl genrsa 2048 > "$KEY_FILE" 2>/dev/null
-    echo "Generated new signing key: key.pem (keep this secret, add to .gitignore)"
+    echo "Generated throwaway CRX key: key.pem (not for trust, just format requirement)"
   fi
-  npx --yes crx3 "$STAGING" --keyPath "$KEY_FILE" --crxPath "$EXT_DIR/$CRX_OUTPUT" 2>/dev/null
+  npx --yes crx3 .output/chrome-mv3 --keyPath "$KEY_FILE" --crxPath "$EXT_DIR/$CRX_OUTPUT" 2>/dev/null
   if [ -f "$CRX_OUTPUT" ]; then
     CRX_SIZE=$(wc -c < "$CRX_OUTPUT" | tr -d ' ')
     CRX_MB=$(echo "scale=1; $CRX_SIZE / 1048576" | bc)
     echo "Created: $CRX_OUTPUT (${CRX_MB}MB)"
   else
-    echo "Warning: .crx creation failed (npx crx3 error). .zip is still available."
+    echo "Warning: .crx creation failed. .zip is still available."
   fi
 else
-  echo "Skipping .crx (npx not available). Install Node.js for .crx packaging."
+  echo "Skipping .crx (npx not available)."
 fi
 
 echo ""
