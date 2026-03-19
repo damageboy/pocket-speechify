@@ -316,10 +316,13 @@ export function initSidePanels(shadow, state, actions) {
         speedPanel.style.animation = '';
         // Force thumb repaint — Chrome doesn't paint ::-webkit-slider-thumb
         // inside shadow DOM until interaction
-        const v = slider.value;
-        slider.value = 0;
-        void slider.offsetWidth;
-        slider.value = v;
+        const sl = speedPanel.querySelector('.speed-slider');
+        if (sl) {
+          const v = sl.value;
+          sl.value = 0;
+          void sl.offsetWidth;
+          sl.value = v;
+        }
       } else if (current.panelOpen === 'voice') {
         speedPanel.style.display = 'none';
         resetSearch();
