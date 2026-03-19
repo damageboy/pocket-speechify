@@ -59,15 +59,18 @@ let workerWaiting = false;
 let sentenceDoneResolve = null;
 
 // Text normalization (text-processing-rs WASM)
-let textProcessingInitialized = false;
-async function ensureTextProcessing() {
-  if (textProcessingInitialized) return;
-  const tpModule = await import(browser.runtime.getURL('lib/text-processing-rs/text_processing_rs.js'));
-  initTextProcessing = tpModule.default;
-  tnNormalizeSentence = tpModule.tnNormalizeSentence;
-  await initTextProcessing();
-  textProcessingInitialized = true;
-  logToSW('[Offscreen] text-processing-rs initialized');
+let textProcessingPromise = null;
+function ensureTextProcessing() {
+  if (!textProcessingPromise) {
+    textProcessingPromise = (async () => {
+      const tpModule = await import(browser.runtime.getURL('lib/text-processing-rs/text_processing_rs.js'));
+      initTextProcessing = tpModule.default;
+      tnNormalizeSentence = tpModule.tnNormalizeSentence;
+      await initTextProcessing();
+      logToSW('[Offscreen] text-processing-rs initialized');
+    })();
+  }
+  return textProcessingPromise;
 }
 
 // Abbreviation expansion (loaded once from data/abbreviations.json)
