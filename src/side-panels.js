@@ -56,7 +56,10 @@ function createSpeedPanel(state, actions) {
   closeIc.style.width = '16px';
   closeIc.style.height = '16px';
   closeBtn.appendChild(closeIc);
-  closeBtn.addEventListener('click', () => state.dispatch({ panelOpen: null }));
+  closeBtn.addEventListener('click', () => {
+    console.log('[Pocket Speechify] Speed panel close clicked');
+    state.dispatch({ panelOpen: null });
+  });
 
   header.appendChild(labelEl);
   header.appendChild(closeBtn);
@@ -85,11 +88,13 @@ function createSpeedPanel(state, actions) {
   incBtn.setAttribute('aria-label', 'Increase speed');
 
   decBtn.addEventListener('click', () => {
+    console.log('[Pocket Speechify] Speed decrease clicked');
     const current = state.get().speed;
     actions.setSpeed(clampSpeed(current - 0.1));
   });
 
   incBtn.addEventListener('click', () => {
+    console.log('[Pocket Speechify] Speed increase clicked');
     const current = state.get().speed;
     actions.setSpeed(clampSpeed(current + 0.1));
   });
@@ -110,7 +115,10 @@ function createSpeedPanel(state, actions) {
     const btn = document.createElement('button');
     btn.className = 'speed-preset-btn';
     btn.textContent = v === 1 ? '1x' : `${v}x`;
-    btn.addEventListener('click', () => actions.setSpeed(v));
+    btn.addEventListener('click', () => {
+      console.log(`[Pocket Speechify] Speed preset ${v}x clicked`);
+      actions.setSpeed(v);
+    });
     presets.appendChild(btn);
     return btn;
   });
@@ -130,6 +138,7 @@ function createSpeedPanel(state, actions) {
   slider.value = state.get().speed;
   slider.style.width = '100%';
   slider.addEventListener('input', () => {
+    console.log(`[Pocket Speechify] Speed slider changed to ${slider.value}`);
     actions.setSpeed(parseFloat(slider.value));
   });
 
@@ -186,7 +195,10 @@ function createVoicePanel(state) {
   closeIc.style.width = '16px';
   closeIc.style.height = '16px';
   closeBtn.appendChild(closeIc);
-  closeBtn.addEventListener('click', () => state.dispatch({ panelOpen: null }));
+  closeBtn.addEventListener('click', () => {
+    console.log('[Pocket Speechify] Voice panel close clicked');
+    state.dispatch({ panelOpen: null });
+  });
 
   header.appendChild(titleEl);
   header.appendChild(closeBtn);
@@ -258,6 +270,7 @@ function createVoicePanel(state) {
       item.appendChild(info);
 
       item.addEventListener('click', () => {
+        console.log(`[Pocket Speechify] Voice ${voice.name} selected`);
         state.dispatch({ voiceId: voice.id, panelOpen: null });
       });
 
@@ -316,10 +329,13 @@ export function initSidePanels(shadow, state, actions) {
         speedPanel.style.animation = '';
         // Force thumb repaint — Chrome doesn't paint ::-webkit-slider-thumb
         // inside shadow DOM until interaction
-        const v = slider.value;
-        slider.value = 0;
-        void slider.offsetWidth;
-        slider.value = v;
+        const sl = speedPanel.querySelector('.speed-slider');
+        if (sl) {
+          const v = sl.value;
+          sl.value = 0;
+          void sl.offsetWidth;
+          sl.value = v;
+        }
       } else if (current.panelOpen === 'voice') {
         speedPanel.style.display = 'none';
         resetSearch();
