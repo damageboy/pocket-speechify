@@ -210,7 +210,7 @@ export default defineContentScript({
       },
     };
 
-    initPillPlayer(shadow, state, actions, paragraphs, ttsHistory);
+    await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory);
 
     initSidePanels(shadow, state, actions);
 
