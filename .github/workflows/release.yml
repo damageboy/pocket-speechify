@@ -23,11 +23,14 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install npm dependencies
+        run: npm ci
+
       # --- Rust + WASM (only if WASM not vendored) ---
       - name: Check if WASM needs building
         id: wasm-check
         run: |
-          if [ -f wasm/pocket_tts_bg.wasm ]; then
+          if [ -f public/wasm/pocket_tts_bg.wasm ]; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
