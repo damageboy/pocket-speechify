@@ -1,5 +1,6 @@
 export default defineBackground(() => {
   let offscreenCreating = null;
+  let activeTabId = null;
 
   async function ensureOffscreenDocument() {
     const existingContexts = await chrome.runtime.getContexts({
@@ -21,10 +22,6 @@ export default defineBackground(() => {
     offscreenCreating = null;
   }
 
-  // Track active downloads for cross-tab coordination
-  // Key: cacheKey (e.g. "pocket-tts-v1/model/tts_b6369a24.safetensors")
-  // Value: { tabIds: Set<number> } — tabs waiting for this download
-  const activeDownloads = new Map();
   const lastLoggedBucket = new Map();
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -54,23 +51,22 @@ export default defineBackground(() => {
           console.log(`[SW] Download ${msg.asset}${msg.voiceId ? ':' + msg.voiceId : ''}: ${msg.percent}%`);
         }
       } else if (msg.type === 'tts-elapsed') {
-        // High-frequency — only log at debug level
         console.debug('[SW] From offscreen:', msg.type);
       } else {
         console.log('[SW] From offscreen:', msg.type, msg);
       }
-      // Events to broadcast to content scripts
+      // Forward events only to the tab that initiated playback
       if (msg.type === 'download-progress' || msg.type === 'download-complete' ||
           msg.type === 'tts-word' || msg.type === 'tts-sentence-event' ||
           msg.type === 'tts-paragraph-done' || msg.type === 'tts-elapsed') {
-        broadcastToContentScripts(msg);
+        sendToActiveTab(msg);
       }
       return;
     }
 
     // --- Debug: relay service worker logs to content script ---
     if (msg.type === 'get-sw-status') {
-      sendResponse({ status: 'alive', offscreenCreating: !!offscreenCreating, activeDownloads: activeDownloads.size });
+      sendResponse({ status: 'alive', offscreenCreating: !!offscreenCreating, activeTabId });
       return;
     }
 
@@ -79,15 +75,8 @@ export default defineBackground(() => {
 
   async function handleTTSFromContent(msg, tabId) {
     try {
-      // Cross-tab download coordination: if a download is already in progress
-      // for the same asset, don't start another one
       if (msg.type === 'tts-play-paragraph') {
-        const downloadKey = `download-${msg.voiceId || 'model'}`;
-        if (activeDownloads.has(downloadKey)) {
-          activeDownloads.get(downloadKey).tabIds.add(tabId);
-        } else {
-          activeDownloads.set(downloadKey, { tabIds: new Set([tabId]) });
-        }
+        activeTabId = tabId;
       }
 
       console.log('[SW] Ensuring offscreen document...');
@@ -101,21 +90,17 @@ export default defineBackground(() => {
     }
   }
 
-  function broadcastToContentScripts(msg) {
-    // Remove source field before sending to content scripts
+  function sendToActiveTab(msg) {
+    if (activeTabId === null) return;
     const { source, ...payload } = msg;
-    chrome.tabs.query({}, (tabs) => {
-      for (const tab of tabs) {
-        chrome.tabs.sendMessage(tab.id, payload).catch(() => {});
-      }
-    });
-
-    // Clean up download tracking on completion
-    if (msg.type === 'download-complete') {
-      const key = `download-${msg.voiceId || 'model'}`;
-      activeDownloads.delete(key);
-    }
+    chrome.tabs.sendMessage(activeTabId, payload).catch(() => {});
   }
+
+  // Toolbar button click: toggle pill player visibility on the active tab
+  chrome.action.onClicked.addListener((tab) => {
+    console.log('[SW] Toolbar button clicked, toggling pill on tab', tab.id);
+    chrome.tabs.sendMessage(tab.id, { type: 'toggle-pill' }).catch(() => {});
+  });
 
   // Startup: placeholder for future startup logic
   chrome.runtime.onInstalled.addListener(() => {

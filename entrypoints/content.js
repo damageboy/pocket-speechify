@@ -212,6 +212,17 @@ export default defineContentScript({
 
     await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory);
 
+    // Toolbar button: toggle pill visibility
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.type !== 'toggle-pill') return;
+      console.log('[Pocket Speechify] toolbar button clicked, toggling pill');
+      const container = shadow.querySelector('.pill-container');
+      if (!container) return;
+      const isHidden = container.style.display === 'none';
+      container.style.display = isHidden ? '' : 'none';
+      console.log(`[Pocket Speechify] pill toggled, display: ${container.style.display || 'visible'}`);
+    });
+
     initSidePanels(shadow, state, actions);
 
     initHighlights(state, paragraphs);
