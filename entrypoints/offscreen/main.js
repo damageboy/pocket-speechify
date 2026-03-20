@@ -483,7 +483,6 @@ async function handlePlayParagraph(msg) {
   if (isNewGeneration) {
     paused = false;
     if (ctx.state === 'suspended') await ctx.resume();
-    if (stretchProcessor) stretchProcessor.reset();
     cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
     playbackStartTime = ctx.currentTime;
@@ -491,6 +490,11 @@ async function handlePlayParagraph(msg) {
     totalActualSec = 0;
     timingCalibrationFactor = 1.0;
   }
+
+  // Always reset stretch processor between paragraphs to flush STFT
+  // overlap-add state that would otherwise bleed the previous paragraph's
+  // tail audio into the next paragraph's first chunk.
+  if (stretchProcessor) stretchProcessor.reset();
 
   // Ensure model + voice are downloaded
   const modelKey = `${CACHE_NAME}/model/tts_b6369a24.safetensors`;
