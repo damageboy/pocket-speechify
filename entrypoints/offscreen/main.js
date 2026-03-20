@@ -622,6 +622,21 @@ async function handlePlayParagraph(msg) {
     paraWordOffset += numNormWords;
   }
 
+  // Contribute the last sentence of this paragraph to calibration.
+  // The in-loop update runs at the START of each sentence N+1 using sentence N's data,
+  // so the final sentence never gets a chance to update — we do it here instead.
+  if (sentenceAudioSec > 0 && currentSentenceMeta) {
+    const lastNumWords = currentSentenceMeta.words?.length || 1;
+    const estimatedFrames = Math.ceil((lastNumWords / 3 + 2) * 12.5);
+    const estimatedSec = estimatedFrames / 12.5;
+    totalEstimatedSec += estimatedSec;
+    totalActualSec += sentenceAudioSec;
+    if (totalEstimatedSec > 0) {
+      timingCalibrationFactor = totalActualSec / totalEstimatedSec;
+      logToSW(`[Offscreen] Post-para timing calibration: factor=${timingCalibrationFactor.toFixed(3)}`);
+    }
+  }
+
   sendToServiceWorker({ type: 'tts-paragraph-done', genId: currentGenId });
   logToSW(`[Offscreen] Paragraph ${paragraphIndex} complete`);
 }
