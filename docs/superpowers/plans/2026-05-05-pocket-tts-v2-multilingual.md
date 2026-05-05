@@ -61,6 +61,7 @@
 ### Task 1: Add multilingual catalogs and asset helpers
 
 **Files:**
+
 - Create: `src/languages.js`
 - Modify: `src/voices.js`
 - Test: `tests/languages.test.js`
@@ -70,7 +71,7 @@
 Create `tests/languages.test.js`:
 
 ```js
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LANGUAGE_ID,
   getDefaultVoiceForLanguage,
@@ -84,67 +85,84 @@ import {
   getModelUrl,
   getTokenizerUrl,
   getVoiceUrl,
-} from '../src/languages.js';
-import { VOICES, getVoice, voiceDisplayName, hasBundledVoiceAvatar } from '../src/voices.js';
+} from "../src/languages.js";
+import {
+  VOICES,
+  getVoice,
+  voiceDisplayName,
+  hasBundledVoiceAvatar,
+} from "../src/voices.js";
 
-const MODEL_REV = 'd29db7978e464fb90cb3359ee0c69a273b9142cc';
-const VOICE_REV = 'e041936c75475d350b405bc870bcf7c22da4e9e6';
+const MODEL_REV = "d29db7978e464fb90cb3359ee0c69a273b9142cc";
+const VOICE_REV = "e041936c75475d350b405bc870bcf7c22da4e9e6";
 
-describe('language catalog', () => {
-  it('uses English as the fallback language', () => {
-    expect(DEFAULT_LANGUAGE_ID).toBe('english');
-    expect(getDefaultVoiceForLanguage('unknown')).toBe('alba');
+describe("language catalog", () => {
+  it("uses English as the fallback language", () => {
+    expect(DEFAULT_LANGUAGE_ID).toBe("english");
+    expect(getDefaultVoiceForLanguage("unknown")).toBe("alba");
   });
 
-  it('maps locales to supported language ids', () => {
-    expect(languageFromLocale('en-US')).toBe('english');
-    expect(languageFromLocale('de_DE')).toBe('german');
-    expect(languageFromLocale('it')).toBe('italian');
-    expect(languageFromLocale('pt-BR')).toBe('portuguese');
-    expect(languageFromLocale('es-ES')).toBe('spanish');
-    expect(languageFromLocale('fr-FR')).toBe('french_24l');
-    expect(languageFromLocale('nl-NL')).toBe(null);
+  it("maps locales to supported language ids", () => {
+    expect(languageFromLocale("en-US")).toBe("english");
+    expect(languageFromLocale("de_DE")).toBe("german");
+    expect(languageFromLocale("it")).toBe("italian");
+    expect(languageFromLocale("pt-BR")).toBe("portuguese");
+    expect(languageFromLocale("es-ES")).toBe("spanish");
+    expect(languageFromLocale("fr-FR")).toBe("french_24l");
+    expect(languageFromLocale("nl-NL")).toBe(null);
   });
 
-  it('exposes language defaults and flags', () => {
-    expect(getLanguage('german').defaultVoice).toBe('juergen');
-    expect(languageFlag('spanish')).toBe('🇪🇸');
+  it("exposes language defaults and flags", () => {
+    expect(getLanguage("german").defaultVoice).toBe("juergen");
+    expect(languageFlag("spanish")).toBe("🇪🇸");
   });
 
-  it('builds v2 cache keys by language', () => {
-    expect(getModelCacheKey('german')).toBe('languages/german/model.safetensors');
-    expect(getTokenizerCacheKey('german')).toBe('languages/german/tokenizer.model');
-    expect(getVoiceCacheKey('german', 'juergen')).toBe('languages/german/embeddings/juergen.safetensors');
+  it("builds v2 cache keys by language", () => {
+    expect(getModelCacheKey("german")).toBe(
+      "languages/german/model.safetensors",
+    );
+    expect(getTokenizerCacheKey("german")).toBe(
+      "languages/german/tokenizer.model",
+    );
+    expect(getVoiceCacheKey("german", "juergen")).toBe(
+      "languages/german/embeddings/juergen.safetensors",
+    );
   });
 
-  it('builds v2 Hugging Face URLs by language and revision', () => {
-    expect(getModelUrl('german')).toContain(`/resolve/${MODEL_REV}/languages/german/model.safetensors`);
-    expect(getTokenizerUrl('german')).toContain(`/resolve/${MODEL_REV}/languages/german/tokenizer.model`);
-    expect(getVoiceUrl('german', 'juergen')).toContain(`/resolve/${VOICE_REV}/languages/german/embeddings/juergen.safetensors`);
+  it("builds v2 Hugging Face URLs by language and revision", () => {
+    expect(getModelUrl("german")).toContain(
+      `/resolve/${MODEL_REV}/languages/german/model.safetensors`,
+    );
+    expect(getTokenizerUrl("german")).toContain(
+      `/resolve/${MODEL_REV}/languages/german/tokenizer.model`,
+    );
+    expect(getVoiceUrl("german", "juergen")).toContain(
+      `/resolve/${VOICE_REV}/languages/german/embeddings/juergen.safetensors`,
+    );
   });
 
-  it('generates language-specific config yaml', () => {
-    const germanYaml = buildLanguageConfigYaml('german');
-    expect(germanYaml).toContain('remove_semicolons: true');
-    expect(germanYaml).toContain('num_layers: 6');
+  it("generates language-specific config yaml", () => {
+    const germanYaml = buildLanguageConfigYaml("german");
+    expect(germanYaml).toContain("remove_semicolons: true");
+    expect(germanYaml).toContain("num_layers: 6");
 
-    const frenchYaml = buildLanguageConfigYaml('french_24l');
-    expect(frenchYaml).toContain('model_recommended_frames_after_eos: 8');
-    expect(frenchYaml).toContain('num_layers: 24');
+    const frenchYaml = buildLanguageConfigYaml("french_24l");
+    expect(frenchYaml).toContain("model_recommended_frames_after_eos: 8");
+    expect(frenchYaml).toContain("num_layers: 24");
   });
 });
 
-describe('voice catalog', () => {
-  it('contains v2 voices and metadata', () => {
+describe("voice catalog", () => {
+  it("contains v2 voices and metadata", () => {
     expect(VOICES.length).toBeGreaterThanOrEqual(26);
-    expect(getVoice('juergen')).toMatchObject({ lang: 'german', gender: 'm' });
-    expect(getVoice('estelle')).toMatchObject({ lang: 'french', gender: 'f' });
+    expect(getVoice("juergen")).toMatchObject({ lang: "german", gender: "m" });
+    expect(getVoice("estelle")).toMatchObject({ lang: "french", gender: "f" });
   });
 
-  it('formats voice ids and knows bundled avatars', () => {
-    expect(voiceDisplayName('bill_boerst')).toBe('Bill Boerst');
-    expect(hasBundledVoiceAvatar('alba')).toBe(true);
-    expect(hasBundledVoiceAvatar('juergen')).toBe(false);
+  it("formats voice ids and knows bundled avatars", () => {
+    expect(voiceDisplayName("bill_boerst")).toBe("Bill Boerst");
+    expect(hasBundledVoiceAvatar("alba")).toBe(true);
+    expect(hasBundledVoiceAvatar("juergen")).toBe(false);
   });
 });
 ```
@@ -164,22 +182,78 @@ Expected: FAIL because `src/languages.js` does not exist and `src/voices.js` lac
 Create `src/languages.js` with:
 
 ```js
-export const DEFAULT_LANGUAGE_ID = 'english';
+export const DEFAULT_LANGUAGE_ID = "english";
 
-export const POCKET_TTS_V2_REPO = 'kyutai/pocket-tts-without-voice-cloning';
-export const POCKET_TTS_V2_MODEL_REVISION = 'd29db7978e464fb90cb3359ee0c69a273b9142cc';
-export const POCKET_TTS_V2_VOICE_REVISION = 'e041936c75475d350b405bc870bcf7c22da4e9e6';
+export const POCKET_TTS_V2_REPO = "kyutai/pocket-tts-without-voice-cloning";
+export const POCKET_TTS_V2_MODEL_REVISION =
+  "d29db7978e464fb90cb3359ee0c69a273b9142cc";
+export const POCKET_TTS_V2_VOICE_REVISION =
+  "e041936c75475d350b405bc870bcf7c22da4e9e6";
 
 export const LANGUAGES = [
-  { id: 'english', description: 'English (latest)', defaultVoice: 'alba', status: 'production', layers: 6, flag: '🇬🇧', removeSemicolons: false, framesAfterEos: null },
-  { id: 'german', description: 'German', defaultVoice: 'juergen', status: 'production', layers: 6, flag: '🇩🇪', removeSemicolons: true, framesAfterEos: null },
-  { id: 'italian', description: 'Italian', defaultVoice: 'giovanni', status: 'production', layers: 6, flag: '🇮🇹', removeSemicolons: false, framesAfterEos: null },
-  { id: 'portuguese', description: 'Portuguese', defaultVoice: 'rafael', status: 'production', layers: 6, flag: '🇧🇷', removeSemicolons: false, framesAfterEos: null },
-  { id: 'spanish', description: 'Spanish', defaultVoice: 'lola', status: 'production', layers: 6, flag: '🇪🇸', removeSemicolons: false, framesAfterEos: null },
-  { id: 'french_24l', description: 'French (24-layer preview)', defaultVoice: 'estelle', status: 'preview', layers: 24, flag: '🇫🇷', removeSemicolons: true, framesAfterEos: 8 },
+  {
+    id: "english",
+    description: "English (latest)",
+    defaultVoice: "alba",
+    status: "production",
+    layers: 6,
+    flag: "🇬🇧",
+    removeSemicolons: false,
+    framesAfterEos: null,
+  },
+  {
+    id: "german",
+    description: "German",
+    defaultVoice: "juergen",
+    status: "production",
+    layers: 6,
+    flag: "🇩🇪",
+    removeSemicolons: true,
+    framesAfterEos: null,
+  },
+  {
+    id: "italian",
+    description: "Italian",
+    defaultVoice: "giovanni",
+    status: "production",
+    layers: 6,
+    flag: "🇮🇹",
+    removeSemicolons: false,
+    framesAfterEos: null,
+  },
+  {
+    id: "portuguese",
+    description: "Portuguese",
+    defaultVoice: "rafael",
+    status: "production",
+    layers: 6,
+    flag: "🇧🇷",
+    removeSemicolons: false,
+    framesAfterEos: null,
+  },
+  {
+    id: "spanish",
+    description: "Spanish",
+    defaultVoice: "lola",
+    status: "production",
+    layers: 6,
+    flag: "🇪🇸",
+    removeSemicolons: false,
+    framesAfterEos: null,
+  },
+  {
+    id: "french_24l",
+    description: "French (24-layer preview)",
+    defaultVoice: "estelle",
+    status: "preview",
+    layers: 24,
+    flag: "🇫🇷",
+    removeSemicolons: true,
+    framesAfterEos: 8,
+  },
 ];
 
-const LANGUAGE_BY_ID = Object.fromEntries(LANGUAGES.map(l => [l.id, l]));
+const LANGUAGE_BY_ID = Object.fromEntries(LANGUAGES.map((l) => [l.id, l]));
 
 export function getLanguage(languageId) {
   return LANGUAGE_BY_ID[languageId] || LANGUAGE_BY_ID[DEFAULT_LANGUAGE_ID];
@@ -198,16 +272,16 @@ export function languageFlag(languageId) {
 }
 
 export function languageFromLocale(locale) {
-  if (!locale || typeof locale !== 'string') return null;
-  const normalized = locale.trim().toLowerCase().replace('_', '-');
-  const primary = normalized.split('-')[0];
+  if (!locale || typeof locale !== "string") return null;
+  const normalized = locale.trim().toLowerCase().replace("_", "-");
+  const primary = normalized.split("-")[0];
   const map = {
-    en: 'english',
-    de: 'german',
-    it: 'italian',
-    pt: 'portuguese',
-    es: 'spanish',
-    fr: 'french_24l',
+    en: "english",
+    de: "german",
+    it: "italian",
+    pt: "portuguese",
+    es: "spanish",
+    fr: "french_24l",
   };
   return map[primary] || null;
 }
@@ -237,14 +311,18 @@ export function getTokenizerUrl(languageId) {
 }
 
 export function getVoiceUrl(languageId, voiceId) {
-  return hfUrl(POCKET_TTS_V2_VOICE_REVISION, getVoiceCacheKey(languageId, voiceId));
+  return hfUrl(
+    POCKET_TTS_V2_VOICE_REVISION,
+    getVoiceCacheKey(languageId, voiceId),
+  );
 }
 
 export function buildLanguageConfigYaml(languageId) {
   const lang = getLanguage(languageId);
-  let header = '';
-  if (lang.removeSemicolons) header += 'remove_semicolons: true\n';
-  if (lang.framesAfterEos !== null) header += `model_recommended_frames_after_eos: ${lang.framesAfterEos}\n`;
+  let header = "";
+  if (lang.removeSemicolons) header += "remove_semicolons: true\n";
+  if (lang.framesAfterEos !== null)
+    header += `model_recommended_frames_after_eos: ${lang.framesAfterEos}\n`;
 
   return `${header}
 flow_lm:
@@ -306,43 +384,228 @@ Replace the current 8-entry catalog with the v2 list. Preserve `DEFAULT_VOICE_ID
 
 ```js
 export const VOICES = [
-  { id: 'alba', name: 'Alba', lang: 'english', gender: 'm', style: 'reading', hasAvatar: true },
-  { id: 'anna', name: 'Anna', lang: 'english', gender: 'f', style: 'conversation', hasAvatar: false },
-  { id: 'azelma', name: 'Azelma', lang: 'english', gender: 'f', style: 'reading', hasAvatar: true },
-  { id: 'bill_boerst', name: 'Bill Boerst', lang: 'english', gender: 'm', style: 'reading', hasAvatar: false },
-  { id: 'caro_davy', name: 'Caro Davy', lang: 'english', gender: 'f', style: 'reading', hasAvatar: false },
-  { id: 'charles', name: 'Charles', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'cosette', name: 'Cosette', lang: 'english', gender: 'f', style: 'expressive', hasAvatar: true },
-  { id: 'eponine', name: 'Eponine', lang: 'english', gender: 'f', style: 'reading', hasAvatar: true },
-  { id: 'estelle', name: 'Estelle', lang: 'french', gender: 'f', style: 'conversation', hasAvatar: false },
-  { id: 'eve', name: 'Eve', lang: 'english', gender: 'f', style: 'conversation', hasAvatar: false },
-  { id: 'fantine', name: 'Fantine', lang: 'english', gender: 'f', style: 'reading', hasAvatar: true },
-  { id: 'george', name: 'George', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'giovanni', name: 'Giovanni', lang: 'italian', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'jane', name: 'Jane', lang: 'english', gender: 'f', style: 'conversation', hasAvatar: false },
-  { id: 'javert', name: 'Javert', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: true },
-  { id: 'jean', name: 'Jean', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: true },
-  { id: 'juergen', name: 'Juergen', lang: 'german', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'lola', name: 'Lola', lang: 'spanish', gender: 'f', style: 'conversation', hasAvatar: false },
-  { id: 'marius', name: 'Marius', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: true },
-  { id: 'mary', name: 'Mary', lang: 'english', gender: 'f', style: 'conversation', hasAvatar: false },
-  { id: 'michael', name: 'Michael', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'paul', name: 'Paul', lang: 'english', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'peter_yearsley', name: 'Peter Yearsley', lang: 'english', gender: 'm', style: 'reading', hasAvatar: false },
-  { id: 'rafael', name: 'Rafael', lang: 'portuguese', gender: 'm', style: 'conversation', hasAvatar: false },
-  { id: 'stuart_bell', name: 'Stuart Bell', lang: 'english', gender: 'm', style: 'reading', hasAvatar: false },
-  { id: 'vera', name: 'Vera', lang: 'english', gender: 'f', style: 'conversation', hasAvatar: false },
+  {
+    id: "alba",
+    name: "Alba",
+    lang: "english",
+    gender: "m",
+    style: "reading",
+    hasAvatar: true,
+  },
+  {
+    id: "anna",
+    name: "Anna",
+    lang: "english",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "azelma",
+    name: "Azelma",
+    lang: "english",
+    gender: "f",
+    style: "reading",
+    hasAvatar: true,
+  },
+  {
+    id: "bill_boerst",
+    name: "Bill Boerst",
+    lang: "english",
+    gender: "m",
+    style: "reading",
+    hasAvatar: false,
+  },
+  {
+    id: "caro_davy",
+    name: "Caro Davy",
+    lang: "english",
+    gender: "f",
+    style: "reading",
+    hasAvatar: false,
+  },
+  {
+    id: "charles",
+    name: "Charles",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "cosette",
+    name: "Cosette",
+    lang: "english",
+    gender: "f",
+    style: "expressive",
+    hasAvatar: true,
+  },
+  {
+    id: "eponine",
+    name: "Eponine",
+    lang: "english",
+    gender: "f",
+    style: "reading",
+    hasAvatar: true,
+  },
+  {
+    id: "estelle",
+    name: "Estelle",
+    lang: "french",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "eve",
+    name: "Eve",
+    lang: "english",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "fantine",
+    name: "Fantine",
+    lang: "english",
+    gender: "f",
+    style: "reading",
+    hasAvatar: true,
+  },
+  {
+    id: "george",
+    name: "George",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "giovanni",
+    name: "Giovanni",
+    lang: "italian",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "jane",
+    name: "Jane",
+    lang: "english",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "javert",
+    name: "Javert",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: true,
+  },
+  {
+    id: "jean",
+    name: "Jean",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: true,
+  },
+  {
+    id: "juergen",
+    name: "Juergen",
+    lang: "german",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "lola",
+    name: "Lola",
+    lang: "spanish",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "marius",
+    name: "Marius",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: true,
+  },
+  {
+    id: "mary",
+    name: "Mary",
+    lang: "english",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "michael",
+    name: "Michael",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "paul",
+    name: "Paul",
+    lang: "english",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "peter_yearsley",
+    name: "Peter Yearsley",
+    lang: "english",
+    gender: "m",
+    style: "reading",
+    hasAvatar: false,
+  },
+  {
+    id: "rafael",
+    name: "Rafael",
+    lang: "portuguese",
+    gender: "m",
+    style: "conversation",
+    hasAvatar: false,
+  },
+  {
+    id: "stuart_bell",
+    name: "Stuart Bell",
+    lang: "english",
+    gender: "m",
+    style: "reading",
+    hasAvatar: false,
+  },
+  {
+    id: "vera",
+    name: "Vera",
+    lang: "english",
+    gender: "f",
+    style: "conversation",
+    hasAvatar: false,
+  },
 ];
 
-export const DEFAULT_VOICE_ID = 'alba';
-const VOICE_BY_ID = Object.fromEntries(VOICES.map(v => [v.id, v]));
+export const DEFAULT_VOICE_ID = "alba";
+const VOICE_BY_ID = Object.fromEntries(VOICES.map((v) => [v.id, v]));
 
 export function getVoice(voiceId) {
   return VOICE_BY_ID[voiceId] || VOICE_BY_ID[DEFAULT_VOICE_ID];
 }
 
 export function voiceDisplayName(voiceId) {
-  return voiceId.split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+  return voiceId
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function hasBundledVoiceAvatar(voiceId) {
@@ -374,6 +637,7 @@ git commit -m "feat: add pocket-tts v2 language and voice catalogs"
 ### Task 2: Add language detection and domain overrides
 
 **Files:**
+
 - Create: `src/language-detection.js`
 - Modify: `package.json`, `package-lock.json`
 - Test: `tests/language-detection.test.js`
@@ -393,18 +657,18 @@ Expected: `package.json` and `package-lock.json` update.
 Create `tests/language-detection.test.js`:
 
 ```js
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LANGUAGE_OVERRIDES_KEY,
   detectMetadataLanguage,
   getSiteLanguageKey,
   resolvePageLanguage,
   saveLanguageOverride,
-} from '../src/language-detection.js';
+} from "../src/language-detection.js";
 
 beforeEach(() => {
-  document.documentElement.innerHTML = '<head></head><body></body>';
-  document.documentElement.removeAttribute('lang');
+  document.documentElement.innerHTML = "<head></head><body></body>";
+  document.documentElement.removeAttribute("lang");
   globalThis.chrome = {
     storage: {
       local: {
@@ -415,78 +679,92 @@ beforeEach(() => {
   };
 });
 
-describe('getSiteLanguageKey', () => {
-  it('uses registrable domains for subdomains', () => {
-    expect(getSiteLanguageKey('www.news.example.co.uk')).toBe('example.co.uk');
+describe("getSiteLanguageKey", () => {
+  it("uses registrable domains for subdomains", () => {
+    expect(getSiteLanguageKey("www.news.example.co.uk")).toBe("example.co.uk");
   });
 
-  it('keeps localhost and IP hosts exact', () => {
-    expect(getSiteLanguageKey('localhost')).toBe('localhost');
-    expect(getSiteLanguageKey('127.0.0.1')).toBe('127.0.0.1');
+  it("keeps localhost and IP hosts exact", () => {
+    expect(getSiteLanguageKey("localhost")).toBe("localhost");
+    expect(getSiteLanguageKey("127.0.0.1")).toBe("127.0.0.1");
   });
 });
 
-describe('detectMetadataLanguage', () => {
-  it('detects html lang before metadata tags', () => {
-    document.documentElement.lang = 'de-DE';
-    const meta = document.createElement('meta');
-    meta.setAttribute('property', 'og:locale');
-    meta.content = 'en_US';
+describe("detectMetadataLanguage", () => {
+  it("detects html lang before metadata tags", () => {
+    document.documentElement.lang = "de-DE";
+    const meta = document.createElement("meta");
+    meta.setAttribute("property", "og:locale");
+    meta.content = "en_US";
     document.head.appendChild(meta);
-    expect(detectMetadataLanguage(document)).toEqual({ language: 'german', raw: 'de-DE' });
+    expect(detectMetadataLanguage(document)).toEqual({
+      language: "german",
+      raw: "de-DE",
+    });
   });
 
-  it('detects og locale', () => {
-    const meta = document.createElement('meta');
-    meta.setAttribute('property', 'og:locale');
-    meta.content = 'fr_FR';
+  it("detects og locale", () => {
+    const meta = document.createElement("meta");
+    meta.setAttribute("property", "og:locale");
+    meta.content = "fr_FR";
     document.head.appendChild(meta);
-    expect(detectMetadataLanguage(document).language).toBe('french_24l');
+    expect(detectMetadataLanguage(document).language).toBe("french_24l");
   });
 
-  it('returns null for unsupported metadata', () => {
-    document.documentElement.lang = 'nl-NL';
+  it("returns null for unsupported metadata", () => {
+    document.documentElement.lang = "nl-NL";
     expect(detectMetadataLanguage(document)).toBe(null);
   });
 });
 
-describe('resolvePageLanguage', () => {
-  it('uses domain override before metadata', async () => {
+describe("resolvePageLanguage", () => {
+  it("uses domain override before metadata", async () => {
     chrome.storage.local.get.mockResolvedValue({
-      [LANGUAGE_OVERRIDES_KEY]: { 'example.com': 'spanish' },
+      [LANGUAGE_OVERRIDES_KEY]: { "example.com": "spanish" },
     });
-    document.documentElement.lang = 'de-DE';
-    await expect(resolvePageLanguage(new URL('https://news.example.com/story'), document)).resolves.toMatchObject({
-      selectedLanguage: 'spanish',
-      detectedLanguage: 'german',
-      languageSource: 'override',
-      siteKey: 'example.com',
-    });
-  });
-
-  it('uses metadata if no override exists', async () => {
-    document.documentElement.lang = 'it-IT';
-    await expect(resolvePageLanguage(new URL('https://example.com'), document)).resolves.toMatchObject({
-      selectedLanguage: 'italian',
-      languageSource: 'metadata',
+    document.documentElement.lang = "de-DE";
+    await expect(
+      resolvePageLanguage(new URL("https://news.example.com/story"), document),
+    ).resolves.toMatchObject({
+      selectedLanguage: "spanish",
+      detectedLanguage: "german",
+      languageSource: "override",
+      siteKey: "example.com",
     });
   });
 
-  it('falls back to English silently', async () => {
-    await expect(resolvePageLanguage(new URL('https://example.com'), document)).resolves.toMatchObject({
-      selectedLanguage: 'english',
+  it("uses metadata if no override exists", async () => {
+    document.documentElement.lang = "it-IT";
+    await expect(
+      resolvePageLanguage(new URL("https://example.com"), document),
+    ).resolves.toMatchObject({
+      selectedLanguage: "italian",
+      languageSource: "metadata",
+    });
+  });
+
+  it("falls back to English silently", async () => {
+    await expect(
+      resolvePageLanguage(new URL("https://example.com"), document),
+    ).resolves.toMatchObject({
+      selectedLanguage: "english",
       detectedLanguage: null,
-      languageSource: 'fallback',
+      languageSource: "fallback",
     });
   });
 });
 
-describe('saveLanguageOverride', () => {
-  it('merges new override into storage', async () => {
-    chrome.storage.local.get.mockResolvedValue({ [LANGUAGE_OVERRIDES_KEY]: { 'old.com': 'german' } });
-    await saveLanguageOverride('example.com', 'spanish');
+describe("saveLanguageOverride", () => {
+  it("merges new override into storage", async () => {
+    chrome.storage.local.get.mockResolvedValue({
+      [LANGUAGE_OVERRIDES_KEY]: { "old.com": "german" },
+    });
+    await saveLanguageOverride("example.com", "spanish");
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
-      [LANGUAGE_OVERRIDES_KEY]: { 'old.com': 'german', 'example.com': 'spanish' },
+      [LANGUAGE_OVERRIDES_KEY]: {
+        "old.com": "german",
+        "example.com": "spanish",
+      },
     });
   });
 });
@@ -507,25 +785,29 @@ Expected: FAIL because `src/language-detection.js` does not exist.
 Create the module:
 
 ```js
-import { getDomain } from 'tldts';
-import { DEFAULT_LANGUAGE_ID, isSupportedLanguage, languageFromLocale } from './languages.js';
+import { getDomain } from "tldts";
+import {
+  DEFAULT_LANGUAGE_ID,
+  isSupportedLanguage,
+  languageFromLocale,
+} from "./languages.js";
 
-export const LANGUAGE_OVERRIDES_KEY = 'pocket-speechify-language-overrides';
+export const LANGUAGE_OVERRIDES_KEY = "pocket-speechify-language-overrides";
 
 export function getSiteLanguageKey(hostname) {
-  const host = String(hostname || '').toLowerCase();
-  if (!host) return '';
+  const host = String(hostname || "").toLowerCase();
+  if (!host) return "";
   const domain = getDomain(host, { allowPrivateDomains: true });
   return domain || host;
 }
 
 function metaContent(doc, selector) {
-  return doc.querySelector(selector)?.getAttribute('content')?.trim() || '';
+  return doc.querySelector(selector)?.getAttribute("content")?.trim() || "";
 }
 
 export function detectMetadataLanguage(doc = document) {
   const candidates = [
-    doc.documentElement?.getAttribute('lang') || '',
+    doc.documentElement?.getAttribute("lang") || "",
     metaContent(doc, 'meta[property="og:locale"]'),
     metaContent(doc, 'meta[http-equiv="content-language" i]'),
     metaContent(doc, 'meta[name="language" i]'),
@@ -550,7 +832,10 @@ export async function saveLanguageOverride(siteKey, languageId) {
   });
 }
 
-export async function resolvePageLanguage(url = new URL(location.href), doc = document) {
+export async function resolvePageLanguage(
+  url = new URL(location.href),
+  doc = document,
+) {
   const siteKey = getSiteLanguageKey(url.hostname);
   const detected = detectMetadataLanguage(doc);
   const overrides = await loadLanguageOverrides();
@@ -561,7 +846,7 @@ export async function resolvePageLanguage(url = new URL(location.href), doc = do
       siteKey,
       selectedLanguage: override,
       detectedLanguage: detected?.language || null,
-      languageSource: 'override',
+      languageSource: "override",
     };
   }
 
@@ -570,7 +855,7 @@ export async function resolvePageLanguage(url = new URL(location.href), doc = do
       siteKey,
       selectedLanguage: detected.language,
       detectedLanguage: detected.language,
-      languageSource: 'metadata',
+      languageSource: "metadata",
     };
   }
 
@@ -578,7 +863,7 @@ export async function resolvePageLanguage(url = new URL(location.href), doc = do
     siteKey,
     selectedLanguage: DEFAULT_LANGUAGE_ID,
     detectedLanguage: null,
-    languageSource: 'fallback',
+    languageSource: "fallback",
   };
 }
 ```
@@ -615,6 +900,7 @@ git commit -m "feat: detect page language and domain overrides"
 ### Task 3: Add language state and pass language through content/RemoteTTS
 
 **Files:**
+
 - Modify: `src/state.js`
 - Modify: `src/remote-tts.js`
 - Modify: `entrypoints/content.js`
@@ -626,22 +912,29 @@ git commit -m "feat: detect page language and domain overrides"
 Modify `tests/state.test.js` to assert initial language fields and language-scoped voice cache. Add tests similar to:
 
 ```js
-import { DEFAULT_LANGUAGE_ID, getDefaultVoiceForLanguage } from '../src/languages.js';
+import {
+  DEFAULT_LANGUAGE_ID,
+  getDefaultVoiceForLanguage,
+} from "../src/languages.js";
 
-it('initializes language state', () => {
-  const state = createState({ selectedLanguage: 'german', detectedLanguage: 'german', languageSource: 'metadata' });
+it("initializes language state", () => {
+  const state = createState({
+    selectedLanguage: "german",
+    detectedLanguage: "german",
+    languageSource: "metadata",
+  });
   expect(state.get()).toMatchObject({
-    selectedLanguage: 'german',
-    detectedLanguage: 'german',
-    languageSource: 'metadata',
-    voiceId: getDefaultVoiceForLanguage('german'),
+    selectedLanguage: "german",
+    detectedLanguage: "german",
+    languageSource: "metadata",
+    voiceId: getDefaultVoiceForLanguage("german"),
   });
 });
 
-it('builds language-scoped voice cache keys', () => {
+it("builds language-scoped voice cache keys", () => {
   const state = createState();
-  expect(state.get().voiceCache['english:alba']).toBe('uncached');
-  expect(state.get().voiceCache['german:juergen']).toBe('uncached');
+  expect(state.get().voiceCache["english:alba"]).toBe("uncached");
+  expect(state.get().voiceCache["german:juergen"]).toBe("uncached");
 });
 ```
 
@@ -660,8 +953,11 @@ Expected: FAIL because `createState` does not accept initial language state and 
 Modify imports and state creation:
 
 ```js
-import { VOICES, DEFAULT_VOICE_ID } from './voices.js';
-import { DEFAULT_LANGUAGE_ID, getDefaultVoiceForLanguage } from './languages.js';
+import { VOICES, DEFAULT_VOICE_ID } from "./voices.js";
+import {
+  DEFAULT_LANGUAGE_ID,
+  getDefaultVoiceForLanguage,
+} from "./languages.js";
 
 function voiceCacheKey(languageId, voiceId) {
   return `${languageId}:${voiceId}`;
@@ -671,9 +967,18 @@ function buildEmptyVoiceCache() {
   const entries = [];
   for (const voice of VOICES) {
     // Initialize common voice/language pairs lazily-friendly by including all languages later if desired.
-    entries.push([voiceCacheKey(voice.lang === 'french' ? 'french_24l' : voice.lang, voice.id), 'uncached']);
+    entries.push([
+      voiceCacheKey(
+        voice.lang === "french" ? "french_24l" : voice.lang,
+        voice.id,
+      ),
+      "uncached",
+    ]);
   }
-  entries.push([voiceCacheKey(DEFAULT_LANGUAGE_ID, DEFAULT_VOICE_ID), 'uncached']);
+  entries.push([
+    voiceCacheKey(DEFAULT_LANGUAGE_ID, DEFAULT_VOICE_ID),
+    "uncached",
+  ]);
   return Object.fromEntries(entries);
 }
 
@@ -681,17 +986,32 @@ const INITIAL_STATE = {
   // existing fields...
   selectedLanguage: DEFAULT_LANGUAGE_ID,
   detectedLanguage: null,
-  languageSource: 'fallback',
+  languageSource: "fallback",
   voiceId: DEFAULT_VOICE_ID,
   // existing fields...
 };
 
 export function createState(initialPatch = {}) {
-  const initialLanguage = initialPatch.selectedLanguage || INITIAL_STATE.selectedLanguage;
-  const initialVoice = initialPatch.voiceId || getDefaultVoiceForLanguage(initialLanguage);
-  let state = { ...INITIAL_STATE, ...initialPatch, selectedLanguage: initialLanguage, voiceId: initialVoice, voiceCache: buildEmptyVoiceCache() };
+  const initialLanguage =
+    initialPatch.selectedLanguage || INITIAL_STATE.selectedLanguage;
+  const initialVoice =
+    initialPatch.voiceId || getDefaultVoiceForLanguage(initialLanguage);
+  let state = {
+    ...INITIAL_STATE,
+    ...initialPatch,
+    selectedLanguage: initialLanguage,
+    voiceId: initialVoice,
+    voiceCache: buildEmptyVoiceCache(),
+  };
   // keep existing implementation
-  return { get, dispatch, subscribe, reset, buildEmptyVoiceCache, voiceCacheKey };
+  return {
+    get,
+    dispatch,
+    subscribe,
+    reset,
+    buildEmptyVoiceCache,
+    voiceCacheKey,
+  };
 }
 ```
 
@@ -702,14 +1022,14 @@ Adjust exact code to preserve current existing state fields.
 Create `tests/remote-tts.test.js`:
 
 ```js
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RemoteTTS } from '../src/remote-tts.js';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RemoteTTS } from "../src/remote-tts.js";
 
-function paragraph(text = 'Hallo Welt.') {
+function paragraph(text = "Hallo Welt.") {
   return {
     text,
-    words: [{ text: 'Hallo' }, { text: 'Welt.' }],
-    sentences: [{ text, words: [{ text: 'Hallo' }, { text: 'Welt.' }] }],
+    words: [{ text: "Hallo" }, { text: "Welt." }],
+    sentences: [{ text, words: [{ text: "Hallo" }, { text: "Welt." }] }],
   };
 }
 
@@ -726,30 +1046,34 @@ beforeEach(() => {
   };
 });
 
-describe('RemoteTTS language routing', () => {
-  it('includes selected language in tts-play-paragraph payload', () => {
+describe("RemoteTTS language routing", () => {
+  it("includes selected language in tts-play-paragraph payload", () => {
     const tts = new RemoteTTS();
-    tts.setVoice('juergen');
-    tts.setLanguage('german');
+    tts.setVoice("juergen");
+    tts.setLanguage("german");
     tts.play([paragraph()], 0, 0, 1.0);
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'tts-play-paragraph',
-      language: 'german',
-      voiceId: 'juergen',
-    }));
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tts-play-paragraph",
+        language: "german",
+        voiceId: "juergen",
+      }),
+    );
   });
 
-  it('lets play() override the previously configured language', () => {
+  it("lets play() override the previously configured language", () => {
     const tts = new RemoteTTS();
-    tts.setVoice('lola');
-    tts.setLanguage('english');
-    tts.play([paragraph('Hola mundo.')], 0, 0, 1.0, 'spanish');
+    tts.setVoice("lola");
+    tts.setLanguage("english");
+    tts.play([paragraph("Hola mundo.")], 0, 0, 1.0, "spanish");
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      language: 'spanish',
-      voiceId: 'lola',
-    }));
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        language: "spanish",
+        voiceId: "lola",
+      }),
+    );
   });
 });
 ```
@@ -767,7 +1091,7 @@ Expected: FAIL because `RemoteTTS` does not yet expose `setLanguage()` or send `
 Import the default language:
 
 ```js
-import { DEFAULT_LANGUAGE_ID } from './languages.js';
+import { DEFAULT_LANGUAGE_ID } from "./languages.js";
 ```
 
 Add implementation:
@@ -792,15 +1116,23 @@ Add `language: this.#language` to `tts-play-paragraph` payload in `#sendCurrentP
 At the top imports add:
 
 ```js
-import { resolvePageLanguage, saveLanguageOverride } from '../src/language-detection.js';
-import { getDefaultVoiceForLanguage } from '../src/languages.js';
+import {
+  resolvePageLanguage,
+  saveLanguageOverride,
+} from "../src/language-detection.js";
+import { getDefaultVoiceForLanguage } from "../src/languages.js";
 ```
 
 Inside `main()` before `createState()`:
 
 ```js
-const languageResolution = await resolvePageLanguage(new URL(location.href), document);
-console.log(`[Pocket Speechify] Language resolved: ${languageResolution.selectedLanguage} (${languageResolution.languageSource})`);
+const languageResolution = await resolvePageLanguage(
+  new URL(location.href),
+  document,
+);
+console.log(
+  `[Pocket Speechify] Language resolved: ${languageResolution.selectedLanguage} (${languageResolution.languageSource})`,
+);
 const state = createState({
   selectedLanguage: languageResolution.selectedLanguage,
   detectedLanguage: languageResolution.detectedLanguage,
@@ -820,13 +1152,25 @@ tts.setLanguage(state.get().selectedLanguage);
 Update every `tts.play(...)` call to pass language as fifth arg:
 
 ```js
-tts.play(paragraphs, fromParagraph, 0, state.get().speed, state.get().selectedLanguage);
+tts.play(
+  paragraphs,
+  fromParagraph,
+  0,
+  state.get().speed,
+  state.get().selectedLanguage,
+);
 ```
 
 and skip paths:
 
 ```js
-tts.play(paragraphs, newPIdx, fromWord, state.get().speed, state.get().selectedLanguage);
+tts.play(
+  paragraphs,
+  newPIdx,
+  fromWord,
+  state.get().speed,
+  state.get().selectedLanguage,
+);
 ```
 
 Add to `actions`:
@@ -895,6 +1239,7 @@ git commit -m "feat: route selected language through TTS playback"
 ### Task 4: Update voice/language UI
 
 **Files:**
+
 - Modify: `src/side-panels.js`
 - Modify: `src/pill-player.js`
 - Modify: `public/css/player.css`
@@ -905,7 +1250,12 @@ Ensure `src/voices.js` exports:
 
 ```js
 export function avatarInitials(voiceId) {
-  return voiceDisplayName(voiceId).split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+  return voiceDisplayName(voiceId)
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 export function avatarColor(voiceId) {
@@ -920,33 +1270,41 @@ export function avatarColor(voiceId) {
 In `src/pill-player.js` imports:
 
 ```js
-import { getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
-import { languageFlag } from './languages.js';
+import {
+  getVoiceAvatarUrl,
+  hasBundledVoiceAvatar,
+  avatarInitials,
+  avatarColor,
+} from "./voices.js";
+import { languageFlag } from "./languages.js";
 ```
 
 Replace direct voice image creation with a helper inside `initPillPlayer`:
 
 ```js
 function renderVoiceButtonContent(voiceId, languageId, forceFallback = false) {
-  voiceBtn.textContent = '';
+  voiceBtn.textContent = "";
   if (hasBundledVoiceAvatar(voiceId) && !forceFallback) {
-    const img = document.createElement('img');
-    img.style.cssText = 'width: 26px; height: 26px; border-radius: 50%; object-fit: cover; pointer-events: none;';
+    const img = document.createElement("img");
+    img.style.cssText =
+      "width: 26px; height: 26px; border-radius: 50%; object-fit: cover; pointer-events: none;";
     img.onerror = () => {
-      console.log(`[Pocket Speechify] Voice avatar fallback triggered for ${voiceId}`);
+      console.log(
+        `[Pocket Speechify] Voice avatar fallback triggered for ${voiceId}`,
+      );
       renderVoiceButtonContent(voiceId, languageId, true);
     };
     img.src = getVoiceAvatarUrl(voiceId);
     voiceBtn.appendChild(img);
   } else {
-    const fallback = document.createElement('span');
-    fallback.className = 'voice-avatar-fallback voice-avatar-fallback-small';
+    const fallback = document.createElement("span");
+    fallback.className = "voice-avatar-fallback voice-avatar-fallback-small";
     fallback.style.background = avatarColor(voiceId);
     fallback.textContent = avatarInitials(voiceId);
     voiceBtn.appendChild(fallback);
   }
-  const flag = document.createElement('span');
-  flag.className = 'language-flag-badge';
+  const flag = document.createElement("span");
+  flag.className = "language-flag-badge";
   flag.textContent = languageFlag(languageId);
   voiceBtn.appendChild(flag);
 }
@@ -959,8 +1317,19 @@ Call it initially and in state subscription when `voiceId` or `selectedLanguage`
 In `src/side-panels.js` import:
 
 ```js
-import { LANGUAGES, getDefaultVoiceForLanguage, getLanguage, languageFlag } from './languages.js';
-import { VOICES, getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
+import {
+  LANGUAGES,
+  getDefaultVoiceForLanguage,
+  getLanguage,
+  languageFlag,
+} from "./languages.js";
+import {
+  VOICES,
+  getVoiceAvatarUrl,
+  hasBundledVoiceAvatar,
+  avatarInitials,
+  avatarColor,
+} from "./voices.js";
 ```
 
 - [ ] **Step 4: Add language selector to voice panel**
@@ -968,22 +1337,22 @@ import { VOICES, getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avata
 In `createVoicePanel(state, actions)` change signature to include `actions`. Add after search or before search:
 
 ```js
-const languageRow = document.createElement('div');
-languageRow.className = 'language-selector-row';
+const languageRow = document.createElement("div");
+languageRow.className = "language-selector-row";
 
-const languageLabel = document.createElement('label');
-languageLabel.className = 'language-selector-label';
-languageLabel.textContent = 'Language';
+const languageLabel = document.createElement("label");
+languageLabel.className = "language-selector-label";
+languageLabel.textContent = "Language";
 
-const languageSelect = document.createElement('select');
-languageSelect.className = 'language-selector';
+const languageSelect = document.createElement("select");
+languageSelect.className = "language-selector";
 for (const lang of LANGUAGES) {
-  const opt = document.createElement('option');
+  const opt = document.createElement("option");
   opt.value = lang.id;
-  opt.textContent = `${lang.flag} ${lang.description}${lang.status === 'preview' ? ' (β)' : ''}`;
+  opt.textContent = `${lang.flag} ${lang.description}${lang.status === "preview" ? " (β)" : ""}`;
   languageSelect.appendChild(opt);
 }
-languageSelect.addEventListener('change', () => {
+languageSelect.addEventListener("change", () => {
   console.log(`[Pocket Speechify] Language ${languageSelect.value} triggered`);
   actions.setLanguage(languageSelect.value);
 });
@@ -1027,7 +1396,7 @@ const filtered = // existing search
 Show language/default metadata in the voice item:
 
 ```js
-langEl.textContent = `${languageFlag(voice.lang === 'french' ? 'french_24l' : voice.lang)} ${voice.lang}${voice.id === defaultVoiceId ? ' · default' : ''}`;
+langEl.textContent = `${languageFlag(voice.lang === "french" ? "french_24l" : voice.lang)} ${voice.lang}${voice.id === defaultVoiceId ? " · default" : ""}`;
 ```
 
 Use fallback avatar when `hasBundledVoiceAvatar(voice.id)` is false.
@@ -1037,7 +1406,11 @@ Use fallback avatar when `hasBundledVoiceAvatar(voice.id)` is false.
 In `initSidePanels`, change:
 
 ```js
-const { panel: voicePanel, sync: syncVoice, resetSearch } = createVoicePanel(state, actions);
+const {
+  panel: voicePanel,
+  sync: syncVoice,
+  resetSearch,
+} = createVoicePanel(state, actions);
 ```
 
 - [ ] **Step 7: Add CSS**
@@ -1095,7 +1468,9 @@ Append to `public/css/player.css`:
   background: var(--bg-primary-dark);
   color: var(--text-primary);
   padding: 8px 10px;
-  font: 13px system-ui, sans-serif;
+  font:
+    13px system-ui,
+    sans-serif;
 }
 ```
 
@@ -1134,6 +1509,7 @@ git commit -m "feat: show language-aware voice controls"
 ### Task 5: Upgrade offscreen asset caching and worker reloading
 
 **Files:**
+
 - Create: `src/tts-load-policy.js`
 - Create: `tests/tts-load-policy.test.js`
 - Modify: `entrypoints/offscreen/main.js`
@@ -1144,48 +1520,56 @@ git commit -m "feat: show language-aware voice controls"
 Create `tests/tts-load-policy.test.js`:
 
 ```js
-import { describe, expect, it } from 'vitest';
-import { getTTSLoadPlan } from '../src/tts-load-policy.js';
+import { describe, expect, it } from "vitest";
+import { getTTSLoadPlan } from "../src/tts-load-policy.js";
 
-describe('getTTSLoadPlan', () => {
-  it('loads model and voice when no worker exists', () => {
-    expect(getTTSLoadPlan({
-      hasWorker: false,
-      currentLoadedLanguage: null,
-      currentLoadedVoiceId: null,
-      language: 'english',
-      voiceId: 'alba',
-    })).toEqual({ loadModel: true, loadVoice: true });
+describe("getTTSLoadPlan", () => {
+  it("loads model and voice when no worker exists", () => {
+    expect(
+      getTTSLoadPlan({
+        hasWorker: false,
+        currentLoadedLanguage: null,
+        currentLoadedVoiceId: null,
+        language: "english",
+        voiceId: "alba",
+      }),
+    ).toEqual({ loadModel: true, loadVoice: true });
   });
 
-  it('loads only voice when language is already loaded and voice changes', () => {
-    expect(getTTSLoadPlan({
-      hasWorker: true,
-      currentLoadedLanguage: 'english',
-      currentLoadedVoiceId: 'alba',
-      language: 'english',
-      voiceId: 'marius',
-    })).toEqual({ loadModel: false, loadVoice: true });
+  it("loads only voice when language is already loaded and voice changes", () => {
+    expect(
+      getTTSLoadPlan({
+        hasWorker: true,
+        currentLoadedLanguage: "english",
+        currentLoadedVoiceId: "alba",
+        language: "english",
+        voiceId: "marius",
+      }),
+    ).toEqual({ loadModel: false, loadVoice: true });
   });
 
-  it('loads neither model nor voice when both are already loaded', () => {
-    expect(getTTSLoadPlan({
-      hasWorker: true,
-      currentLoadedLanguage: 'german',
-      currentLoadedVoiceId: 'juergen',
-      language: 'german',
-      voiceId: 'juergen',
-    })).toEqual({ loadModel: false, loadVoice: false });
+  it("loads neither model nor voice when both are already loaded", () => {
+    expect(
+      getTTSLoadPlan({
+        hasWorker: true,
+        currentLoadedLanguage: "german",
+        currentLoadedVoiceId: "juergen",
+        language: "german",
+        voiceId: "juergen",
+      }),
+    ).toEqual({ loadModel: false, loadVoice: false });
   });
 
-  it('loads model and voice when language changes', () => {
-    expect(getTTSLoadPlan({
-      hasWorker: true,
-      currentLoadedLanguage: 'english',
-      currentLoadedVoiceId: 'alba',
-      language: 'german',
-      voiceId: 'juergen',
-    })).toEqual({ loadModel: true, loadVoice: true });
+  it("loads model and voice when language changes", () => {
+    expect(
+      getTTSLoadPlan({
+        hasWorker: true,
+        currentLoadedLanguage: "english",
+        currentLoadedVoiceId: "alba",
+        language: "german",
+        voiceId: "juergen",
+      }),
+    ).toEqual({ loadModel: true, loadVoice: true });
   });
 });
 ```
@@ -1203,7 +1587,13 @@ Expected: FAIL because `src/tts-load-policy.js` does not exist.
 Create:
 
 ```js
-export function getTTSLoadPlan({ hasWorker, currentLoadedLanguage, currentLoadedVoiceId, language, voiceId }) {
+export function getTTSLoadPlan({
+  hasWorker,
+  currentLoadedLanguage,
+  currentLoadedVoiceId,
+  language,
+  voiceId,
+}) {
   const loadModel = !hasWorker || currentLoadedLanguage !== language;
   const loadVoice = loadModel || currentLoadedVoiceId !== voiceId;
   return { loadModel, loadVoice };
@@ -1233,8 +1623,8 @@ import {
   getModelUrl,
   getTokenizerUrl,
   getVoiceUrl,
-} from '../../src/languages.js';
-import { getTTSLoadPlan } from '../../src/tts-load-policy.js';
+} from "../../src/languages.js";
+import { getTTSLoadPlan } from "../../src/tts-load-policy.js";
 ```
 
 - [ ] **Step 4: Change cache version and loaded-state variables**
@@ -1242,14 +1632,15 @@ import { getTTSLoadPlan } from '../../src/tts-load-policy.js';
 Replace:
 
 ```js
-const CACHE_NAME = 'pocket-tts-v1';
-const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
+const CACHE_NAME = "pocket-tts-v1";
+const HF_BASE =
+  "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main";
 ```
 
 with:
 
 ```js
-const CACHE_NAME = 'pocket-tts-v2';
+const CACHE_NAME = "pocket-tts-v2";
 ```
 
 Add:
@@ -1271,8 +1662,14 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId, language)
 Add `language` to `download-progress` and `download-complete` messages:
 
 ```js
-sendToServiceWorker({ type: 'download-progress', asset, voiceId, language, percent });
-sendToServiceWorker({ type: 'download-complete', asset, voiceId, language });
+sendToServiceWorker({
+  type: "download-progress",
+  asset,
+  voiceId,
+  language,
+  percent,
+});
+sendToServiceWorker({ type: "download-complete", asset, voiceId, language });
 ```
 
 - [ ] **Step 6: Add selective asset helpers**
@@ -1280,15 +1677,27 @@ sendToServiceWorker({ type: 'download-complete', asset, voiceId, language });
 Insert before `handlePlayParagraph`. These helpers intentionally fetch model/tokenizer/config only when the loaded language changes, and fetch voice only when the active language or voice changes:
 
 ```js
-async function getOrDownloadAsset({ cacheKey, url, asset, voiceId = null, language }) {
+async function getOrDownloadAsset({
+  cacheKey,
+  url,
+  asset,
+  voiceId = null,
+  language,
+}) {
   let data = await getCached(cacheKey);
   if (data) {
-    logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} for ${language} loaded from cache`);
+    logToSW(
+      `[Offscreen] ${asset}${voiceId ? ":" + voiceId : ""} for ${language} loaded from cache`,
+    );
     return data;
   }
-  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} for ${language} not cached, downloading...`);
+  logToSW(
+    `[Offscreen] ${asset}${voiceId ? ":" + voiceId : ""} for ${language} not cached, downloading...`,
+  );
   data = await downloadWithProgress(url, cacheKey, asset, voiceId, language);
-  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} for ${language} download complete`);
+  logToSW(
+    `[Offscreen] ${asset}${voiceId ? ":" + voiceId : ""} for ${language} download complete`,
+  );
   return data;
 }
 
@@ -1297,18 +1706,20 @@ async function loadModelAssets(language) {
     getOrDownloadAsset({
       cacheKey: getModelCacheKey(language),
       url: getModelUrl(language),
-      asset: 'model',
+      asset: "model",
       language,
     }),
     getOrDownloadAsset({
       cacheKey: getTokenizerCacheKey(language),
       url: getTokenizerUrl(language),
-      asset: 'tokenizer',
+      asset: "tokenizer",
       language,
     }),
   ]);
 
-  const configData = new TextEncoder().encode(buildLanguageConfigYaml(language)).buffer;
+  const configData = new TextEncoder().encode(
+    buildLanguageConfigYaml(language),
+  ).buffer;
   return { modelData, tokenizerData, configData };
 }
 
@@ -1316,7 +1727,7 @@ async function loadVoiceAsset(language, voiceId) {
   return getOrDownloadAsset({
     cacheKey: getVoiceCacheKey(language, voiceId),
     url: getVoiceUrl(language, voiceId),
-    asset: 'voice',
+    asset: "voice",
     voiceId,
     language,
   });
@@ -1350,7 +1761,9 @@ const loadPlan = getTTSLoadPlan({
 });
 
 const modelAssets = loadPlan.loadModel ? await loadModelAssets(language) : null;
-const voiceData = loadPlan.loadVoice ? await loadVoiceAsset(language, effectiveVoiceId) : null;
+const voiceData = loadPlan.loadVoice
+  ? await loadVoiceAsset(language, effectiveVoiceId)
+  : null;
 await ensureWorker(modelAssets, voiceData, effectiveVoiceId, language);
 ```
 
@@ -1365,7 +1778,8 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language) {
   const mustLoadModel = !worker || currentLoadedLanguage !== language;
 
   if (mustLoadModel) {
-    if (!modelAssets) throw new Error(`Missing model assets for language ${language}`);
+    if (!modelAssets)
+      throw new Error(`Missing model assets for language ${language}`);
     const { modelData, tokenizerData, configData } = modelAssets;
 
     if (worker) {
@@ -1375,25 +1789,35 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language) {
     currentLoadedVoiceId = null;
     currentLoadedLanguage = null;
 
-    worker = new Worker(browser.runtime.getURL('tts-worker.js'));
+    worker = new Worker(browser.runtime.getURL("tts-worker.js"));
     worker.onmessage = (e) => handleWorkerMessage(e.data);
     worker.onerror = (e) => {
-      logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
+      logToSW(
+        `[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`,
+      );
     };
 
-    const wasmJsUrl = browser.runtime.getURL('wasm/pocket_tts.js');
+    const wasmJsUrl = browser.runtime.getURL("wasm/pocket_tts.js");
     worker.postMessage(
-      { type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language },
+      {
+        type: "load-model",
+        modelData,
+        tokenizerData,
+        configData,
+        wasmJsUrl,
+        language,
+      },
       [modelData, tokenizerData, configData],
     );
-    await waitForWorkerMessage('model-ready');
+    await waitForWorkerMessage("model-ready");
     currentLoadedLanguage = language;
   }
 
   if (currentLoadedVoiceId !== voiceId) {
-    if (!voiceData) throw new Error(`Missing voice data for ${language}:${voiceId}`);
-    worker.postMessage({ type: 'load-voice', voiceId, voiceData, language });
-    await waitForWorkerMessage('voice-ready');
+    if (!voiceData)
+      throw new Error(`Missing voice data for ${language}:${voiceId}`);
+    worker.postMessage({ type: "load-voice", voiceId, voiceData, language });
+    await waitForWorkerMessage("voice-ready");
     currentLoadedVoiceId = voiceId;
   }
 }
@@ -1414,17 +1838,21 @@ Change the tokenizer handling to use provided data:
 ```js
 const tokenizerBytes = new Uint8Array(msg.tokenizerData);
 if (tokenizerBytes.byteLength === 0) {
-  throw new Error('Tokenizer data is required for pocket-tts v2 language models');
+  throw new Error(
+    "Tokenizer data is required for pocket-tts v2 language models",
+  );
 }
 
-diag(`[TTS Worker] Loading language=${msg.language}: config=${configBytes.byteLength}B, weights=${(weightsBytes.byteLength / 1024 / 1024).toFixed(1)}MB, tokenizer=${tokenizerBytes.byteLength}B`);
+diag(
+  `[TTS Worker] Loading language=${msg.language}: config=${configBytes.byteLength}B, weights=${(weightsBytes.byteLength / 1024 / 1024).toFixed(1)}MB, tokenizer=${tokenizerBytes.byteLength}B`,
+);
 model.load_from_buffer(configBytes, weightsBytes, tokenizerBytes);
 ```
 
 Post model-ready with language:
 
 ```js
-self.postMessage({ type: 'model-ready', sampleRate, language: msg.language });
+self.postMessage({ type: "model-ready", sampleRate, language: msg.language });
 ```
 
 - [ ] **Step 12: Run tests and build**
@@ -1450,6 +1878,7 @@ git commit -m "feat: load pocket-tts v2 assets by language"
 ### Task 6: Gate English-only normalization for multilingual playback
 
 **Files:**
+
 - Modify: `entrypoints/offscreen/main.js`
 
 - [ ] **Step 1: Locate paragraph normalization block**
@@ -1469,16 +1898,20 @@ Use:
 
 ```js
 let normalizedParaText = paragraphText;
-if (language === 'english') {
+if (language === "english") {
   const abbrevMap = await loadAbbreviations();
   const expandedParaText = expandAbbreviations(paragraphText, abbrevMap);
   await ensureTextProcessing();
   normalizedParaText = tnNormalizeSentence(expandedParaText);
   if (normalizedParaText !== expandedParaText) {
-    logToSW(`[Offscreen] Para TN: "${expandedParaText.substring(0, 60)}" → "${normalizedParaText.substring(0, 60)}"`);
+    logToSW(
+      `[Offscreen] Para TN: "${expandedParaText.substring(0, 60)}" → "${normalizedParaText.substring(0, 60)}"`,
+    );
   }
 } else {
-  logToSW(`[Offscreen] Skipping English text normalization for language=${language}`);
+  logToSW(
+    `[Offscreen] Skipping English text normalization for language=${language}`,
+  );
 }
 ```
 
@@ -1506,6 +1939,7 @@ git commit -m "fix: avoid English normalization for non-English TTS"
 ### Task 7: Update download progress state for language-scoped assets
 
 **Files:**
+
 - Modify: `entrypoints/background.js`
 - Modify: `entrypoints/content.js`
 - Modify: `src/state.js`
@@ -1516,13 +1950,13 @@ git commit -m "fix: avoid English normalization for non-English TTS"
 In `entrypoints/background.js` change:
 
 ```js
-const key = `${msg.asset}:${msg.voiceId || ''}`;
+const key = `${msg.asset}:${msg.voiceId || ""}`;
 ```
 
 to:
 
 ```js
-const key = `${msg.language || ''}:${msg.asset}:${msg.voiceId || ''}`;
+const key = `${msg.language || ""}:${msg.asset}:${msg.voiceId || ""}`;
 ```
 
 Update log format to include language when present.
@@ -1536,10 +1970,12 @@ Change voice cache updates to use language-scoped keys:
 ```js
 const { asset, voiceId, language, percent } = e.detail;
 const cacheLanguage = language || state.get().selectedLanguage;
-state.dispatch({ downloadProgress: { asset, voiceId, language: cacheLanguage, percent } });
-if (asset === 'voice' && voiceId) {
+state.dispatch({
+  downloadProgress: { asset, voiceId, language: cacheLanguage, percent },
+});
+if (asset === "voice" && voiceId) {
   const key = state.voiceCacheKey(cacheLanguage, voiceId);
-  const voiceCache = { ...state.get().voiceCache, [key]: 'downloading' };
+  const voiceCache = { ...state.get().voiceCache, [key]: "downloading" };
   state.dispatch({ voiceCache });
 }
 ```
@@ -1550,9 +1986,9 @@ On complete, define `cacheLanguage` in this handler too and clear progress for e
 const { asset, voiceId, language } = e.detail;
 const cacheLanguage = language || state.get().selectedLanguage;
 
-if (asset === 'voice' && voiceId) {
+if (asset === "voice" && voiceId) {
   const key = state.voiceCacheKey(cacheLanguage, voiceId);
-  const voiceCache = { ...state.get().voiceCache, [key]: 'cached' };
+  const voiceCache = { ...state.get().voiceCache, [key]: "cached" };
   state.dispatch({ voiceCache, downloadProgress: null });
 } else {
   state.dispatch({ downloadProgress: null });
@@ -1564,14 +2000,14 @@ if (asset === 'voice' && voiceId) {
 In `src/side-panels.js`, replace:
 
 ```js
-const cacheStatus = state.get().voiceCache[voice.id] || 'uncached';
+const cacheStatus = state.get().voiceCache[voice.id] || "uncached";
 ```
 
 with:
 
 ```js
 const cacheKey = state.voiceCacheKey(state.get().selectedLanguage, voice.id);
-const cacheStatus = state.get().voiceCache[cacheKey] || 'uncached';
+const cacheStatus = state.get().voiceCache[cacheKey] || "uncached";
 ```
 
 - [ ] **Step 4: Run tests/build**
@@ -1597,6 +2033,7 @@ git commit -m "feat: track language-scoped download progress"
 ### Task 8: Update build script and README
 
 **Files:**
+
 - Modify: `scripts/build-wasm.sh`
 - Modify: `README.md`
 
@@ -1668,6 +2105,7 @@ git commit -m "docs: describe multilingual pocket-tts v2 support"
 ### Task 9: Full verification and manual smoke checklist
 
 **Files:**
+
 - No code changes expected unless failures are found.
 
 - [ ] **Step 1: Run unit tests**
