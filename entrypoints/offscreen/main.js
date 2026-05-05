@@ -462,15 +462,17 @@ browser.runtime.onMessage.addListener((msg) => {
     case 'tts-set-speed':
       handleSetSpeed(msg.speed);
       break;
-    case 'tts-clear-cache':
-      activeLoadToken++;
+    case 'tts-clear-cache': {
+      const clearLoadToken = ++activeLoadToken;
       caches.delete(CACHE_NAME).then(deleted => {
+        if (clearLoadToken !== activeLoadToken) return;
         logToSW(`[Offscreen] Cache cleared: ${deleted}`);
         if (worker) { worker.terminate(); worker = null; }
         currentLoadedVoiceId = null;
         currentLoadedLanguage = null;
       });
       break;
+    }
   }
 });
 
