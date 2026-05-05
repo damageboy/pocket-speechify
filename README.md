@@ -140,18 +140,19 @@ pre-commit install
 
 #### Building WASM from a local pocket-tts checkout
 
-By default `build-wasm.sh` clones `damageboy/pocket-tts`, the pocket-tts v2.1.0 multilingual fork, from GitHub into a temp directory. `npm run build`, `npm run zip`, and `scripts/verify-build.sh` reuse existing `public/wasm/` artifacts and only run `build-wasm.sh` when they are missing. Set `POCKET_TTS_REPO` to point at a local checkout instead — useful when iterating on the TTS engine without publishing a new release:
+By default `build-wasm.sh` clones `damageboy/pocket-tts`, the pocket-tts v2.1.0 multilingual fork, from GitHub into a temp directory and checks out a pinned `POCKET_TTS_REF`. `npm run build`, `npm run zip`, and `scripts/verify-build.sh` reuse existing `public/wasm/` artifacts and only run `build-wasm.sh` when they are missing.
+
+Override the source when needed:
 
 ```bash
-# One-off
-POCKET_TTS_REPO=~/projects/pocket-tts npm run build:wasm
+# Build from a local checkout instead of cloning. The checkout is read-only.
+POCKET_TTS_DIR=~/projects/pocket-tts npm run build:wasm
 
-# Or export for the whole shell session
-export POCKET_TTS_REPO=~/projects/pocket-tts
-npm run build:wasm
+# Build from a different remote ref. Defaults are damageboy/pocket-tts + the pinned known-good commit.
+POCKET_TTS_REF=d5159887defad3ac9694433c6c1047c065869b1d npm run build:wasm
 ```
 
-The local repo is **never modified** — only read from. The temp staging directory for WASM artifacts is still created and cleaned up as usual.
+`POCKET_TTS_REPO` remains supported as a backwards-compatible alias for `POCKET_TTS_DIR`. The local repo is **never modified** — only read from. The temp staging directory for WASM artifacts is still created and cleaned up as usual.
 
 ### CI
 

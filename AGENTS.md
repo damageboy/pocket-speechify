@@ -12,18 +12,18 @@ A Chrome extension that replicates the Speechify text-to-speech UI as a lightwei
 
 Builds the pocket-tts WASM binary and vendors it into `public/wasm/`. By default it clones `babybirdprd/pocket-tts` from GitHub into a temp directory.
 
-Set `POCKET_TTS_REPO` to use a **local checkout** instead — skip the clone and build from that directory directly:
+By default the script clones `damageboy/pocket-tts` and checks out the pinned `POCKET_TTS_REF`. Set `POCKET_TTS_DIR` to use a **local checkout** instead — skip the clone and build from that directory directly:
 
 ```bash
 # One-off
-POCKET_TTS_REPO=~/projects/pocket-tts npm run build:wasm
+POCKET_TTS_DIR=~/projects/pocket-tts npm run build:wasm
 
 # Or export for the session
-export POCKET_TTS_REPO=~/projects/pocket-tts
+export POCKET_TTS_DIR=~/projects/pocket-tts
 npm run build:wasm
 ```
 
-The local repo is never modified. The temp staging dir for wasm-pack/wasm-bindgen output is always created and cleaned up regardless.
+`POCKET_TTS_REPO` is still accepted as a backwards-compatible alias. The local repo is never modified. The temp staging dir for wasm-pack/wasm-bindgen output is always created and cleaned up regardless.
 
 ## Extension Architecture & Context Boundaries
 
