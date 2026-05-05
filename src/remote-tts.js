@@ -1,5 +1,6 @@
 // src/remote-tts.js
 import { DEFAULT_VOICE_ID } from './voices.js';
+import { DEFAULT_LANGUAGE_ID } from './languages.js';
 import { MockTTS } from './mock-tts.js';
 
 /**
@@ -16,6 +17,7 @@ export class RemoteTTS extends EventTarget {
   #currentEntryIdx = 0;
   #speed = 1.0;
   #voiceId = DEFAULT_VOICE_ID;
+  #language = DEFAULT_LANGUAGE_ID;
   #paragraphs = null;
   #listener = null;
   #fallback = null;
@@ -38,7 +40,8 @@ export class RemoteTTS extends EventTarget {
    * Builds a paragraph-level index map and sends paragraphs one at a time to offscreen.
    * The offscreen document normalizes each paragraph before sentence splitting.
    */
-  play(paragraphs, fromParagraph = 0, fromWord = 0, speed = 1.0) {
+  play(paragraphs, fromParagraph = 0, fromWord = 0, speed = 1.0, language = this.#language) {
+    this.#language = language || DEFAULT_LANGUAGE_ID;
     if (this.#fallback) {
       this.#fallback.play(paragraphs, fromParagraph, fromWord, speed);
       return;
@@ -118,6 +121,10 @@ export class RemoteTTS extends EventTarget {
     this.#voiceId = voiceId;
   }
 
+  setLanguage(language) {
+    this.#language = language || DEFAULT_LANGUAGE_ID;
+  }
+
   // --- Private ---
 
   #useFallback() {
@@ -159,6 +166,7 @@ export class RemoteTTS extends EventTarget {
       originalSentenceCount: para.sentences.length,
       originalWordCount: para.words.length,
       startParaWordOffset,
+      language: this.#language,
       voiceId: this.#voiceId,
       speed: this.#speed,
       source: 'content',

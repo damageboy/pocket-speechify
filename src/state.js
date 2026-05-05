@@ -1,7 +1,18 @@
 import { VOICES, DEFAULT_VOICE_ID } from './voices.js';
+import { DEFAULT_LANGUAGE_ID, getDefaultVoiceForLanguage } from './languages.js';
+
+function voiceCacheKey(languageId, voiceId) {
+  return `${languageId}:${voiceId}`;
+}
+
+function languageIdForVoice(voice) {
+  return voice.lang === 'french' ? 'french_24l' : voice.lang;
+}
 
 function buildEmptyVoiceCache() {
-  return Object.fromEntries(VOICES.map(v => [v.id, 'uncached']));
+  const entries = VOICES.map(voice => [voiceCacheKey(languageIdForVoice(voice), voice.id), 'uncached']);
+  entries.push([voiceCacheKey(DEFAULT_LANGUAGE_ID, DEFAULT_VOICE_ID), 'uncached']);
+  return Object.fromEntries(entries);
 }
 
 const INITIAL_STATE = {
@@ -10,6 +21,10 @@ const INITIAL_STATE = {
   currentSentenceIndex: null,
   currentWordIndex: null,
   speed: 1.0,
+  selectedLanguage: DEFAULT_LANGUAGE_ID,
+  detectedLanguage: null,
+  languageSource: 'fallback',
+  siteKey: '',
   voiceId: DEFAULT_VOICE_ID,
   panelOpen: null,
   pillExpanded: false,
@@ -17,13 +32,22 @@ const INITIAL_STATE = {
   elapsedSec: 0,
   elapsedOffsetSec: 0,
   modelCached: false,
-  voiceCache: buildEmptyVoiceCache(),
+  voiceCache: null,
   downloadProgress: null,
 };
 
-export function createState() {
+export function createState(initialPatch = {}) {
   const bus = new EventTarget();
-  let state = { ...INITIAL_STATE };
+  const initialLanguage = initialPatch.selectedLanguage || INITIAL_STATE.selectedLanguage;
+  const initialVoice = initialPatch.voiceId || getDefaultVoiceForLanguage(initialLanguage);
+  const initialState = {
+    ...INITIAL_STATE,
+    ...initialPatch,
+    selectedLanguage: initialLanguage,
+    voiceId: initialVoice,
+    voiceCache: buildEmptyVoiceCache(),
+  };
+  let state = { ...initialState };
 
   function get() {
     return { ...state };
@@ -46,8 +70,8 @@ export function createState() {
   }
 
   function reset() {
-    dispatch({ ...INITIAL_STATE });
+    dispatch({ ...initialState, voiceCache: buildEmptyVoiceCache() });
   }
 
-  return { get, dispatch, subscribe, reset, buildEmptyVoiceCache };
+  return { get, dispatch, subscribe, reset, buildEmptyVoiceCache, voiceCacheKey };
 }

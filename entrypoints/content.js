@@ -7,6 +7,8 @@ import { initSidePanels } from '../src/side-panels.js';
 import { initHighlights } from '../src/highlight.js';
 import { initHoverPlayer } from '../src/hover-player.js';
 import { initScrollNav } from '../src/scroll-nav.js';
+import { resolvePageLanguage, saveLanguageOverride } from '../src/language-detection.js';
+import { getDefaultVoiceForLanguage } from '../src/languages.js';
 
 function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
   return paragraphs[pIdx].sentences
@@ -33,7 +35,14 @@ export default defineContentScript({
     style.textContent = cssText;
     shadow.appendChild(style);
 
-    const state = createState();
+    const languageResolution = await resolvePageLanguage(new URL(location.href), document);
+    console.log(`[Pocket Speechify] Language resolved: ${languageResolution.selectedLanguage} (${languageResolution.languageSource})`);
+    const state = createState({
+      selectedLanguage: languageResolution.selectedLanguage,
+      detectedLanguage: languageResolution.detectedLanguage,
+      languageSource: languageResolution.languageSource,
+      siteKey: languageResolution.siteKey,
+    });
 
     const paragraphs = extractContent();
     log.info(`Extracted ${paragraphs.length} paragraphs`);
@@ -44,6 +53,8 @@ export default defineContentScript({
     // totalDurationSec will be estimated by RemoteTTS on play()
 
     const tts = new RemoteTTS();
+    tts.setLanguage(state.get().selectedLanguage);
+    tts.setVoice(state.get().voiceId);
 
     // Wire TTS events to state updates
     tts.addEventListener('word', (e) => {
@@ -104,10 +115,13 @@ export default defineContentScript({
       });
     });
 
-    // Wire voiceId state changes to RemoteTTS
+    // Wire language and voiceId state changes to RemoteTTS
     state.subscribe((current, prev) => {
       if (current.voiceId !== prev.voiceId) {
         tts.setVoice(current.voiceId);
+      }
+      if (current.selectedLanguage !== prev.selectedLanguage) {
+        tts.setLanguage(current.selectedLanguage);
       }
     });
 
@@ -116,7 +130,7 @@ export default defineContentScript({
         if (paragraphs.length === 0) { log.warn('play: no paragraphs'); return; }
         log.debug(`play(fromParagraph=${fromParagraph}), speed=${state.get().speed}`);
         state.dispatch({ playback: 'playing' });
-        tts.play(paragraphs, fromParagraph, 0, state.get().speed);
+        tts.play(paragraphs, fromParagraph, 0, state.get().speed, state.get().selectedLanguage);
         ttsHistory.push({
           text: paragraphs[fromParagraph].sentences[0].text,
           paragraphIndex: fromParagraph,
@@ -169,7 +183,7 @@ export default defineContentScript({
             paragraphIndex: newPIdx,
             sentenceIndex: newSIdx,
           });
-          tts.play(paragraphs, newPIdx, fromWord, state.get().speed);
+          tts.play(paragraphs, newPIdx, fromWord, state.get().speed, state.get().selectedLanguage);
         }
       },
       skipBack() {
@@ -200,13 +214,32 @@ export default defineContentScript({
             paragraphIndex: newPIdx,
             sentenceIndex: newSIdx,
           });
-          tts.play(paragraphs, newPIdx, fromWord, state.get().speed);
+          tts.play(paragraphs, newPIdx, fromWord, state.get().speed, state.get().selectedLanguage);
         }
       },
       setSpeed(speed) {
         log.debug(`setSpeed(${speed})`);
         tts.setSpeed(speed);
         state.dispatch({ speed });
+      },
+      async setLanguage(languageId) {
+        console.log(`[Pocket Speechify] Language ${languageId} triggered`);
+        const voiceId = getDefaultVoiceForLanguage(languageId);
+        await saveLanguageOverride(state.get().siteKey, languageId);
+        tts.stop();
+        tts.setLanguage(languageId);
+        tts.setVoice(voiceId);
+        state.dispatch({
+          selectedLanguage: languageId,
+          languageSource: 'override',
+          voiceId,
+          playback: 'idle',
+          currentParagraphIndex: null,
+          currentSentenceIndex: null,
+          currentWordIndex: null,
+          elapsedSec: 0,
+          panelOpen: 'voice',
+        });
       },
     };
 
