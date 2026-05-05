@@ -41,11 +41,11 @@ git clone https://github.com/damageboy/pocket-speechify.git
 cd pocket-speechify
 ```
 
-WASM artifacts are vendored in `wasm/`. If you need to rebuild them:
+Pocket-tts WASM artifacts are generated into `public/wasm/` and are not checked into git. They are built on demand if missing:
 
 ```bash
 # Requires Rust + wasm-pack
-bash scripts/build-wasm.sh
+npm run build:wasm
 ```
 
 Then load the directory as an unpacked extension.
@@ -140,7 +140,7 @@ pre-commit install
 
 #### Building WASM from a local pocket-tts checkout
 
-By default `build-wasm.sh` clones `damageboy/pocket-tts`, the pocket-tts v2.1.0 multilingual fork, from GitHub into a temp directory. Set `POCKET_TTS_REPO` to point at a local checkout instead — useful when iterating on the TTS engine without publishing a new release:
+By default `build-wasm.sh` clones `damageboy/pocket-tts`, the pocket-tts v2.1.0 multilingual fork, from GitHub into a temp directory. `npm run build`, `npm run zip`, and `scripts/verify-build.sh` reuse existing `public/wasm/` artifacts and only run `build-wasm.sh` when they are missing. Set `POCKET_TTS_REPO` to point at a local checkout instead — useful when iterating on the TTS engine without publishing a new release:
 
 ```bash
 # One-off
@@ -155,7 +155,7 @@ The local repo is **never modified** — only read from. The temp staging direct
 
 ### CI
 
-Every push to `master` runs the build workflow and uploads a build artifact. Tagged pushes (`v*`) additionally create a GitHub Release with `.zip` and `.crx` attachments.
+Every push to `master` runs the build workflow and uploads a build artifact. CI starts from a fresh checkout where generated WASM artifacts are absent, so it builds pocket-tts WASM before packaging. Tagged pushes (`v*`) additionally create a GitHub Release with `.zip` and `.crx` attachments.
 
 ---
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build pocket-tts WASM binary and vendor into the extension.
+# Build pocket-tts WASM binary into the extension's generated public/wasm directory.
 # Prerequisites: Rust toolchain, wasm-pack (or wasm-bindgen-cli)
 #
 # Usage: ./scripts/build-wasm.sh
@@ -82,7 +82,7 @@ echo "--- Cleaning up ---"
 rm -rf "$TMP_DIR"
 
 echo ""
-echo "=== Done! WASM artifacts vendored to public/wasm/ ==="
+echo "=== Done! WASM artifacts generated in public/wasm/ ==="
 echo "Next steps:"
 echo "  1. Run npm run build"
 echo "  2. Test multilingual playback in Chrome"

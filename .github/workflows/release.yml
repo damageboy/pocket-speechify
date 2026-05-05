@@ -27,7 +27,7 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # --- Rust + WASM (only if WASM not vendored) ---
+      # --- Rust + WASM (generated on demand if missing) ---
       - name: Check if WASM needs building
         id: wasm-check
         run: |

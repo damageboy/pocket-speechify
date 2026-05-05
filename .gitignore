@@ -6,6 +6,10 @@ screenshots/
 *.crx
 key.pem
 
+# Generated pocket-tts WASM artifacts (built on demand if missing)
+public/wasm/pocket_tts.js
+public/wasm/pocket_tts_bg.wasm
+
 # Dev tools
 .playwright-mcp/
 trace.json.gz
