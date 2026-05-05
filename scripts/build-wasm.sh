@@ -5,7 +5,7 @@
 # Usage: ./scripts/build-wasm.sh
 #
 # This script:
-# 1. Clones babybirdprd/pocket-tts to a temp directory
+# 1. Clones damageboy/pocket-tts to a temp directory
 # 2. Builds the WASM target
 # 3. Copies the WASM binary + JS glue into wasm/
 # 4. Downloads the tokenizer model from HuggingFace
@@ -27,8 +27,8 @@ else
   SRC_DIR="$TMP_DIR/pocket-tts"
   echo "Temp dir: $TMP_DIR"
   echo ""
-  echo "--- Cloning babybirdprd/pocket-tts ---"
-  git clone --depth 1 https://github.com/babybirdprd/pocket-tts "$SRC_DIR"
+  echo "--- Cloning damageboy/pocket-tts ---"
+  git clone --depth 1 https://github.com/damageboy/pocket-tts "$SRC_DIR"
 fi
 
 # Step 2: Build WASM

@@ -4,7 +4,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/damageboy/pocket-speechify?label=release)](https://github.com/damageboy/pocket-speechify/releases/latest)
 [![Download .crx](https://img.shields.io/github/downloads/damageboy/pocket-speechify/total?label=downloads)](https://github.com/damageboy/pocket-speechify/releases/latest)
 
-A lightweight Chrome extension that replicates the Speechify text-to-speech UI — floating pill player, word highlighting, and voice selection — powered by [Kyutai's pocket-tts](https://huggingface.co/kyutai/pocket-tts-without-voice-cloning) WASM model running entirely in your browser.
+A lightweight Chrome extension that replicates the Speechify text-to-speech UI — floating pill player, word highlighting, and voice selection — powered by the multilingual pocket-tts v2.1.0 WASM model running entirely in your browser.
 
 ---
 
@@ -13,10 +13,12 @@ A lightweight Chrome extension that replicates the Speechify text-to-speech UI �
 - **Floating pill player** — fixed to the right edge of any page, draggable, collapses when not in use
 - **Word-level highlighting** — sentence and word highlights track playback in real time
 - **Pitch-preserving speed control** — 0.4x to 4.5x via [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) WASM; pitch stays natural at any speed
-- **8 voices** — Alba, Marius, Javert, Jean, Fantine, Cosette, Eponine, Azelma
+- **Multilingual pocket-tts v2.1.0 support** — English, German, Italian, Portuguese, Spanish, and French preview voices
+- **Automatic language detection** — reads page metadata (`lang`, `og:locale`, and language meta tags) and supports saved domain language overrides
 - **Hover-to-play** — hover over any paragraph to start reading from there
 - **Scroll-to-highlight** — floating nav pill snaps you back to the word being read
-- **Fully offline after first load** — model and voices are cached locally (~236MB model + ~1MB per voice)
+- **Fully offline after first use per language** — model, tokenizer, and voice assets download on demand and are cached locally with the Cache API
+- **Memory-conscious loading** — only one language model is loaded into memory at a time
 - **No API keys, no accounts, no telemetry**
 
 ---
@@ -55,8 +57,8 @@ Then load the directory as an unpacked extension.
 1. Navigate to any article or page with readable text
 2. The pill player appears on the right edge — click **▶** to start reading
 3. The extension reads the page paragraph by paragraph, highlighting the current sentence and word
-4. On first use, the TTS model downloads automatically (~236MB, cached permanently)
-5. Voices download on first selection (~1MB each, also cached)
+4. On first use for a language, the model and tokenizer download automatically (around 100MB per language)
+5. Voices download on first selection and are cached with the per-language model/tokenizer assets via the Cache API
 
 ### Controls
 
@@ -84,7 +86,7 @@ flowchart LR
     end
 
     subgraph OD["Offscreen Document"]
-        Cache["Model & voice cache\nCache API"]
+        Cache["Per-language model/tokenizer/voice cache\nCache API"]
         Sched["AudioContext\nscheduler"]
         Stretch["Signalsmith Stretch\nWASM · direct mode"]
         Cache --> Sched
@@ -107,7 +109,7 @@ flowchart LR
 
 - **Content script** — injects the pill player UI into pages via shadow DOM, handles highlighting
 - **Service worker** — routes messages between content script and offscreen document
-- **Offscreen document** — owns all audio: downloads model/voices, runs the scheduler, applies pitch-preserving time-stretching via Signalsmith Stretch WASM
+- **Offscreen document** — owns all audio: detects the selected language, downloads per-language model/tokenizer/voice assets, keeps only one model loaded at a time, runs the scheduler, and applies pitch-preserving time-stretching via Signalsmith Stretch WASM
 - **TTS worker** — runs pocket-tts WASM inference in a Web Worker; streams audio chunks back
 
 ### Speed control
@@ -138,7 +140,7 @@ pre-commit install
 
 #### Building WASM from a local pocket-tts checkout
 
-By default `build-wasm.sh` clones `babybirdprd/pocket-tts` from GitHub into a temp directory. Set `POCKET_TTS_REPO` to point at a local checkout instead — useful when iterating on the TTS engine without publishing a new release:
+By default `build-wasm.sh` clones `damageboy/pocket-tts`, the pocket-tts v2.1.0 multilingual fork, from GitHub into a temp directory. Set `POCKET_TTS_REPO` to point at a local checkout instead — useful when iterating on the TTS engine without publishing a new release:
 
 ```bash
 # One-off
@@ -159,6 +161,7 @@ Every push to `master` runs the build workflow and uploads a build artifact. Tag
 
 ## Credits
 
-- [Kyutai](https://kyutai.org/) — [pocket-tts](https://huggingface.co/kyutai/pocket-tts-without-voice-cloning) WASM TTS model
+- [Kyutai](https://kyutai.org/) — original [pocket-tts](https://huggingface.co/kyutai/pocket-tts-without-voice-cloning) WASM TTS model
+- [damageboy/pocket-tts](https://github.com/damageboy/pocket-tts) — pocket-tts v2.1.0 multilingual fork used by the extension build
 - [Signalsmith Audio](https://signalsmith-audio.co.uk/) — [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) pitch-preserving time stretching
 - [Speechify](https://speechify.com/) — UI/UX reference
