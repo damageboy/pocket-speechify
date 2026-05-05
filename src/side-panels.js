@@ -1,19 +1,10 @@
 import { closeIcon, searchIcon } from './icons.js';
-import { VOICES, getVoiceAvatarUrl } from './voices.js';
+import { LANGUAGES, getDefaultVoiceForLanguage, getLanguage, languageFlag } from './languages.js';
+import { VOICES, getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
 
 // ============================================================
 // HELPERS
 // ============================================================
-
-function avatarColor(name) {
-  // Derive a consistent hue from the name string
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) & 0xffffffff;
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 55%, 42%)`;
-}
 
 function speedLabel(speed) {
   if (speed < 0.9) return 'Slow';
@@ -138,7 +129,7 @@ function createSpeedPanel(state, actions) {
   slider.value = state.get().speed;
   slider.style.width = '100%';
   slider.addEventListener('input', () => {
-    console.log(`[Pocket Speechify] Speed slider changed to ${slider.value}`);
+    console.log(`[Pocket Speechify] Speed slider triggered to ${slider.value}`);
     actions.setSpeed(parseFloat(slider.value));
   });
 
@@ -176,7 +167,43 @@ function createSpeedPanel(state, actions) {
 // VOICE PANEL
 // ============================================================
 
-function createVoicePanel(state) {
+function voiceLanguageId(voice) {
+  return voice.lang === 'french' ? 'french_24l' : voice.lang;
+}
+
+function renderVoiceAvatar(voice) {
+  const avatar = document.createElement('div');
+  avatar.className = 'voice-avatar';
+  avatar.style.position = 'relative';
+
+  function showFallback() {
+    const fallback = document.createElement('span');
+    fallback.className = 'voice-avatar-fallback';
+    fallback.style.background = avatarColor(voice.id);
+    fallback.textContent = avatarInitials(voice.id);
+    avatar.replaceChildren(fallback);
+  }
+
+  if (hasBundledVoiceAvatar(voice.id)) {
+    const avatarImg = document.createElement('img');
+    avatarImg.alt = '';
+    avatarImg.onload = () => {
+      avatar.replaceChildren(avatarImg);
+    };
+    avatarImg.onerror = () => {
+      console.log(`[Pocket Speechify] Voice avatar fallback triggered for ${voice.id}`);
+      showFallback();
+    };
+    avatarImg.src = getVoiceAvatarUrl(voice.id);
+    avatar.appendChild(avatarImg);
+  } else {
+    showFallback();
+  }
+
+  return avatar;
+}
+
+function createVoicePanel(state, actions) {
   const panel = document.createElement('div');
   panel.className = 'side-panel voice-panel';
 
@@ -219,6 +246,35 @@ function createVoicePanel(state) {
   searchWrapper.appendChild(searchInput);
   panel.appendChild(searchWrapper);
 
+  // --- Language selector ---
+  const languageRow = document.createElement('div');
+  languageRow.className = 'language-selector-row';
+
+  const languageLabel = document.createElement('label');
+  languageLabel.className = 'language-selector-label';
+  languageLabel.textContent = 'Language';
+
+  const languageSelect = document.createElement('select');
+  languageSelect.className = 'language-selector';
+  languageSelect.setAttribute('aria-label', 'Language');
+
+  LANGUAGES.forEach((language) => {
+    const option = document.createElement('option');
+    option.value = language.id;
+    const previewLabel = language.status === 'preview' ? ' · preview beta' : '';
+    option.textContent = `${language.flag} ${language.description}${previewLabel}`;
+    languageSelect.appendChild(option);
+  });
+  languageSelect.value = state.get().selectedLanguage;
+  languageSelect.addEventListener('change', () => {
+    console.log(`[Pocket Speechify] Language ${languageSelect.value} triggered`);
+    actions.setLanguage(languageSelect.value);
+  });
+
+  languageRow.appendChild(languageLabel);
+  languageRow.appendChild(languageSelect);
+  panel.appendChild(languageRow);
+
   // --- Voice list ---
   const listEl = document.createElement('div');
   listEl.className = 'voice-list';
@@ -226,28 +282,40 @@ function createVoicePanel(state) {
 
   const allVoices = VOICES;
 
-  function renderList(selectedVoiceId, query) {
+  function sortedVoices(selectedLanguage) {
+    const defaultVoiceId = getDefaultVoiceForLanguage(selectedLanguage);
+    return [...allVoices].sort((a, b) => {
+      const aLanguage = voiceLanguageId(a);
+      const bLanguage = voiceLanguageId(b);
+      const aRank = a.id === defaultVoiceId ? 0 : aLanguage === selectedLanguage ? 1 : 2;
+      const bRank = b.id === defaultVoiceId ? 0 : bLanguage === selectedLanguage ? 1 : 2;
+      if (aRank !== bRank) return aRank - bRank;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function renderList(selectedVoiceId, selectedLanguage, query) {
     while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
 
     const q = (query || '').toLowerCase();
-    const filtered = q
-      ? allVoices.filter(v => v.name.toLowerCase().includes(q))
-      : allVoices;
+    const defaultVoiceId = getDefaultVoiceForLanguage(selectedLanguage);
+    const filtered = sortedVoices(selectedLanguage).filter((voice) => {
+      if (!q) return true;
+      const voiceLanguage = getLanguage(voiceLanguageId(voice));
+      return voice.name.toLowerCase().includes(q) ||
+        voiceLanguage.description.toLowerCase().includes(q) ||
+        voice.lang.toLowerCase().includes(q);
+    });
 
     filtered.forEach(voice => {
       const item = document.createElement('div');
       item.className = 'voice-item';
       if (voice.id === selectedVoiceId) item.classList.add('selected');
 
-      const avatar = document.createElement('div');
-      avatar.className = 'voice-avatar';
-      avatar.style.position = 'relative';
-      const avatarImg = document.createElement('img');
-      avatarImg.src = getVoiceAvatarUrl(voice.id);
-      avatarImg.style.cssText = 'width: 100%; height: 100%; border-radius: 50%; object-fit: cover;';
-      avatar.appendChild(avatarImg);
+      const avatar = renderVoiceAvatar(voice);
 
-      const cacheStatus = state.get().voiceCache[voice.id] || 'uncached';
+      const languageId = voiceLanguageId(voice);
+      const cacheStatus = state.get().voiceCache[state.voiceCacheKey(languageId, voice.id)] || state.get().voiceCache[voice.id] || 'uncached';
       if (cacheStatus === 'downloading') {
         avatar.classList.add('downloading');
       }
@@ -261,7 +329,8 @@ function createVoicePanel(state) {
 
       const langEl = document.createElement('div');
       langEl.className = 'voice-lang';
-      langEl.textContent = voice.lang;
+      const defaultLabel = voice.id === defaultVoiceId ? ' · default' : '';
+      langEl.textContent = `${languageFlag(languageId)} ${getLanguage(languageId).description}${defaultLabel}`;
 
       info.appendChild(nameEl);
       info.appendChild(langEl);
@@ -270,7 +339,7 @@ function createVoicePanel(state) {
       item.appendChild(info);
 
       item.addEventListener('click', () => {
-        console.log(`[Pocket Speechify] Voice ${voice.name} selected`);
+        console.log(`[Pocket Speechify] Voice ${voice.name} triggered`);
         state.dispatch({ voiceId: voice.id, panelOpen: null });
       });
 
@@ -279,15 +348,18 @@ function createVoicePanel(state) {
   }
 
   // Initial render
-  renderList(state.get().voiceId, '');
+  renderList(state.get().voiceId, state.get().selectedLanguage, '');
 
   // Search input handler
   searchInput.addEventListener('input', () => {
-    renderList(state.get().voiceId, searchInput.value);
+    console.log('[Pocket Speechify] Voice search triggered');
+    const current = state.get();
+    renderList(current.voiceId, current.selectedLanguage, searchInput.value);
   });
 
   function sync(s) {
-    renderList(s.voiceId, searchInput.value);
+    languageSelect.value = s.selectedLanguage;
+    renderList(s.voiceId, s.selectedLanguage, searchInput.value);
   }
 
   return { panel, sync, resetSearch: () => { searchInput.value = ''; } };
@@ -308,7 +380,7 @@ export function initSidePanels(shadow, state, actions) {
   pill.style.overflow = 'visible';
 
   const { panel: speedPanel, sync: syncSpeed } = createSpeedPanel(state, actions);
-  const { panel: voicePanel, sync: syncVoice, resetSearch } = createVoicePanel(state);
+  const { panel: voicePanel, sync: syncVoice, resetSearch } = createVoicePanel(state, actions);
 
   // Panels start hidden
   speedPanel.style.display = 'none';
@@ -358,7 +430,7 @@ export function initSidePanels(shadow, state, actions) {
 
     // Keep voice panel in sync while it's open
     if (current.panelOpen === 'voice' &&
-        (current.voiceId !== prev.voiceId || current.voiceCache !== prev.voiceCache)) {
+        (current.voiceId !== prev.voiceId || current.selectedLanguage !== prev.selectedLanguage || current.voiceCache !== prev.voiceCache)) {
       syncVoice(current);
     }
   });

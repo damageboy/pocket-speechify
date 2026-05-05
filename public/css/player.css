@@ -513,6 +513,64 @@
   color: var(--text-secondary);
 }
 
+.voice-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.voice-avatar-fallback-small {
+  width: 26px;
+  height: 26px;
+  font-size: 9px;
+  pointer-events: none;
+}
+
+.language-flag-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #1f1f1f;
+  border: 1px solid #2e2e2e;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.language-selector-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.language-selector-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.language-selector {
+  width: 100%;
+  border: 1px solid var(--bg-divider);
+  border-radius: 8px;
+  background: var(--bg-primary-dark);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font: 13px system-ui, sans-serif;
+}
+
 /* ============================================================
    SPEED PANEL
    ============================================================ */

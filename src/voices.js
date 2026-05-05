@@ -235,6 +235,16 @@ export function hasBundledVoiceAvatar(voiceId) {
 	return Boolean(getVoice(voiceId).hasAvatar);
 }
 
+export function avatarInitials(voiceId) {
+	return voiceDisplayName(voiceId).split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+}
+
+export function avatarColor(voiceId) {
+	let hash = 0;
+	for (const ch of voiceId) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff;
+	return `hsl(${Math.abs(hash) % 360}, 55%, 42%)`;
+}
+
 /**
  * Get the avatar URL for a voice ID.
  * Works in content scripts and extension pages.

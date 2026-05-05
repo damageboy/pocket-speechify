@@ -1,5 +1,6 @@
-import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, bookmarkIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon, navHistoryIcon } from './icons.js';
-import { getVoiceAvatarUrl } from './voices.js';
+import { waveformIcon, playIcon, pauseIcon, circularProgress, skipBackIcon, skipForwardIcon, closeIcon, settingsIcon, turnOffIcon, navGeneralIcon, navPlayButtonsIcon, navKeyboardIcon, navAccessibilityIcon, navDebugIcon, navHistoryIcon } from './icons.js';
+import { getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
+import { languageFlag } from './languages.js';
 
 function formatDuration(totalSec, elapsedSec) {
   const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
@@ -42,6 +43,7 @@ function renderIdlePlayButton(hasContent, actions) {
   if (hasContent) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      console.log('[Pocket Speechify] Play button clicked');
       actions.play();
     });
   }
@@ -68,6 +70,7 @@ function renderToggleButton(playbackState, percent, actions) {
     toggleBtn.appendChild(ic);
     toggleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      console.log('[Pocket Speechify] Pause button clicked');
       actions.pause();
     });
   } else {
@@ -78,6 +81,7 @@ function renderToggleButton(playbackState, percent, actions) {
     toggleBtn.appendChild(ic);
     toggleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      console.log('[Pocket Speechify] Resume button clicked');
       actions.resume();
     });
   }
@@ -100,6 +104,7 @@ function createSkipButtons(actions) {
   skipBackBtn.appendChild(sbIcon);
   skipBackBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[Pocket Speechify] Skip back button clicked');
     actions.skipBack();
   });
 
@@ -112,6 +117,7 @@ function createSkipButtons(actions) {
   skipFwdBtn.appendChild(sfIcon);
   skipFwdBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[Pocket Speechify] Skip forward button clicked');
     actions.skipForward();
   });
 
@@ -201,10 +207,42 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
   const voiceBtn = document.createElement('button');
   voiceBtn.className = 'btn btn-32 btn-standard';
   voiceBtn.setAttribute('aria-label', 'Voice');
-  const voiceImg = document.createElement('img');
-  voiceImg.style.cssText = 'width: 26px; height: 26px; border-radius: 50%; object-fit: cover; pointer-events: none;';
-  voiceImg.src = getVoiceAvatarUrl(initState.voiceId);
-  voiceBtn.appendChild(voiceImg);
+  voiceBtn.style.position = 'relative';
+
+  function renderVoiceFallback(voiceId) {
+    const fallback = document.createElement('span');
+    fallback.className = 'voice-avatar-fallback voice-avatar-fallback-small';
+    fallback.style.background = avatarColor(voiceId);
+    fallback.textContent = avatarInitials(voiceId);
+    return fallback;
+  }
+
+  function renderVoiceButton(voiceId, languageId) {
+    voiceBtn.replaceChildren();
+
+    const flagBadge = document.createElement('span');
+    flagBadge.className = 'language-flag-badge';
+    flagBadge.textContent = languageFlag(languageId);
+
+    if (hasBundledVoiceAvatar(voiceId)) {
+      const voiceImg = document.createElement('img');
+      voiceImg.style.cssText = 'width: 26px; height: 26px; border-radius: 50%; object-fit: cover; pointer-events: none;';
+      voiceImg.onerror = () => {
+        const current = state.get();
+        if (current.voiceId !== voiceId || current.selectedLanguage !== languageId) return;
+        console.log(`[Pocket Speechify] Voice avatar fallback triggered for ${voiceId}`);
+        voiceBtn.replaceChildren(renderVoiceFallback(voiceId), flagBadge);
+      };
+      voiceImg.src = getVoiceAvatarUrl(voiceId);
+      voiceBtn.appendChild(voiceImg);
+    } else {
+      voiceBtn.appendChild(renderVoiceFallback(voiceId));
+    }
+
+    voiceBtn.appendChild(flagBadge);
+  }
+
+  renderVoiceButton(initState.voiceId, initState.selectedLanguage);
   voiceBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     console.log('[Pocket Speechify] Voice button clicked');
@@ -222,6 +260,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
   speedBtn.appendChild(speedText);
   speedBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[Pocket Speechify] Speed button clicked');
     state.dispatch({ panelOpen: state.get().panelOpen === 'speed' ? null : 'speed' });
   });
   pillMain.appendChild(speedBtn);
@@ -272,12 +311,23 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
       'z-index: 10',
       'animation: panelSlideIn 0.15s ease-out',
     ].join('; ');
-    aboutPanel.innerHTML = `
-      <div style="font-weight: 700; font-size: 15px; margin-bottom: 4px;">${name}</div>
-      <div style="color: var(--text-secondary);">Version ${version}</div>
-      <div style="color: var(--text-tertiary); font-size: 11px; margin-top: 8px;">pocket-tts WASM &middot; 24kHz</div>
-    `;
-    aboutPanel.addEventListener('click', (ev) => { ev.stopPropagation(); aboutPanel.remove(); });
+    const aboutName = document.createElement('div');
+    aboutName.style.cssText = 'font-weight: 700; font-size: 15px; margin-bottom: 4px;';
+    aboutName.textContent = name;
+    const aboutVersion = document.createElement('div');
+    aboutVersion.style.cssText = 'color: var(--text-secondary);';
+    aboutVersion.textContent = `Version ${version}`;
+    const aboutDetails = document.createElement('div');
+    aboutDetails.style.cssText = 'color: var(--text-tertiary); font-size: 11px; margin-top: 8px;';
+    aboutDetails.textContent = 'pocket-tts WASM · 24kHz';
+    aboutPanel.appendChild(aboutName);
+    aboutPanel.appendChild(aboutVersion);
+    aboutPanel.appendChild(aboutDetails);
+    aboutPanel.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      console.log('[Pocket Speechify] About panel clicked');
+      aboutPanel.remove();
+    });
     pill.appendChild(aboutPanel);
   });
   // Settings button (32x32)
@@ -343,7 +393,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
     contentPane.appendChild(contentBody);
 
     function renderContent() {
-      contentBody.innerHTML = '';
+      contentBody.replaceChildren();
       if (active === 'General') {
         const row = document.createElement('div');
         row.className = 'settings-field-row';
@@ -366,7 +416,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
         slider.value = settings.scale;
         slider.addEventListener('input', (ev) => {
           ev.stopPropagation();
-          console.log(`[Pocket Speechify] Scale slider changed to ${ev.target.value}`);
+          console.log(`[Pocket Speechify] Scale slider triggered to ${ev.target.value}`);
           settings.scale = parseFloat(ev.target.value);
           valueText.textContent = `${settings.scale.toFixed(1)}×`;
           pill.style.setProperty('--pill-scale', settings.scale);
@@ -476,7 +526,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
     }
 
     function renderNav() {
-      nav.innerHTML = '';
+      nav.replaceChildren();
       sections.forEach(({ key, icon }) => {
         const item = document.createElement('button');
         item.className = 'settings-nav-item' + (key === active ? ' active' : '');
@@ -488,7 +538,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
         item.appendChild(label);
         item.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          console.log(`[Pocket Speechify] Settings section: ${key}`);
+          console.log(`[Pocket Speechify] Settings section ${key} clicked`);
           active = key;
           contentTitle.textContent = key;
           renderNav();
@@ -502,7 +552,10 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
     renderContent();
     dialog.appendChild(nav);
     dialog.appendChild(contentPane);
-    dialog.addEventListener('click', (ev) => ev.stopPropagation());
+    dialog.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      console.log('[Pocket Speechify] Settings dialog clicked');
+    });
     // Append to shadow root (not pill) — avoids pill's scale(1.5) transform
     shadow.appendChild(dialog);
   });
@@ -519,6 +572,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
   turnOffBtn.appendChild(turnOffIc);
   turnOffBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    console.log('[Pocket Speechify] Turn off button clicked');
     actions.stop();
     const container = shadow.querySelector('.pill-container');
     if (container) container.style.display = 'none';
@@ -529,11 +583,13 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
 
   // --- Hover events on pill container ---
   pill.addEventListener('mouseenter', () => {
+    console.log('[Pocket Speechify] Pill hover triggered');
     pill.classList.add('expanded');
     state.dispatch({ pillExpanded: true });
   });
 
   pill.addEventListener('mouseleave', () => {
+    console.log('[Pocket Speechify] Pill unhover triggered');
     pill.classList.remove('expanded');
     state.dispatch({ pillExpanded: false });
   });
@@ -547,9 +603,9 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
       secsSpan.textContent = dur.secs;
     }
 
-    // Update voice avatar when voice changes
-    if (current.voiceId !== prev.voiceId) {
-      voiceImg.src = getVoiceAvatarUrl(current.voiceId);
+    // Update voice avatar and language badge when voice or language changes
+    if (current.voiceId !== prev.voiceId || current.selectedLanguage !== prev.selectedLanguage) {
+      renderVoiceButton(current.voiceId, current.selectedLanguage);
     }
 
     // Show download progress as circular ring around play button
