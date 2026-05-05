@@ -44,11 +44,12 @@ export default defineBackground(() => {
         return;
       }
       if (msg.type === 'download-progress') {
-        const key = `${msg.asset}:${msg.voiceId || ''}`;
+        const key = `${msg.language || ''}:${msg.asset}:${msg.voiceId || ''}`;
         const bucket = Math.floor(msg.percent / 5) * 5;
         if (!lastLoggedBucket.has(key) || lastLoggedBucket.get(key) < bucket) {
           lastLoggedBucket.set(key, bucket);
-          console.log(`[SW] Download ${msg.asset}${msg.voiceId ? ':' + msg.voiceId : ''}: ${msg.percent}%`);
+          const languageLabel = msg.language ? `${msg.language}:` : '';
+          console.log(`[SW] Download ${languageLabel}${msg.asset}${msg.voiceId ? ':' + msg.voiceId : ''}: ${msg.percent}%`);
         }
       } else if (msg.type === 'tts-elapsed') {
         console.debug('[SW] From offscreen:', msg.type);

@@ -315,7 +315,8 @@ function createVoicePanel(state, actions) {
       const avatar = renderVoiceAvatar(voice);
 
       const languageId = voiceLanguageId(voice);
-      const cacheStatus = state.get().voiceCache[state.voiceCacheKey(languageId, voice.id)] || state.get().voiceCache[voice.id] || 'uncached';
+      const cacheKey = state.voiceCacheKey(state.get().selectedLanguage, voice.id);
+      const cacheStatus = state.get().voiceCache[cacheKey] || 'uncached';
       if (cacheStatus === 'downloading') {
         avatar.classList.add('downloading');
       }

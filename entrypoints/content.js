@@ -87,21 +87,28 @@ export default defineContentScript({
     });
 
     tts.addEventListener('download-progress', (e) => {
-      const { asset, voiceId, percent } = e.detail;
-      state.dispatch({ downloadProgress: { asset, voiceId, percent } });
+      const { asset, voiceId, language, percent } = e.detail;
+      const cacheLanguage = language || state.get().selectedLanguage;
+      state.dispatch({ downloadProgress: { asset, voiceId, language: cacheLanguage, percent } });
       if (asset === 'voice' && voiceId) {
-        const voiceCache = { ...state.get().voiceCache, [voiceId]: 'downloading' };
+        const key = state.voiceCacheKey(cacheLanguage, voiceId);
+        const voiceCache = { ...state.get().voiceCache, [key]: 'downloading' };
         state.dispatch({ voiceCache });
       }
     });
 
     tts.addEventListener('download-complete', (e) => {
-      const { asset, voiceId } = e.detail;
-      if (asset === 'model') {
-        state.dispatch({ modelCached: true, downloadProgress: null });
-      } else if (asset === 'voice' && voiceId) {
-        const voiceCache = { ...state.get().voiceCache, [voiceId]: 'cached' };
+      const { asset, voiceId, language } = e.detail;
+      const cacheLanguage = language || state.get().selectedLanguage;
+      if (asset === 'voice' && voiceId) {
+        const key = state.voiceCacheKey(cacheLanguage, voiceId);
+        const voiceCache = { ...state.get().voiceCache, [key]: 'cached' };
         state.dispatch({ voiceCache, downloadProgress: null });
+      } else {
+        state.dispatch({
+          ...(asset === 'model' ? { modelCached: true } : {}),
+          downloadProgress: null,
+        });
       }
     });
 
