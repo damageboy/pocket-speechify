@@ -22,7 +22,6 @@ echo "=== Verifying extension build ==="
 # Core files
 check "entrypoints/content.js"
 check "entrypoints/background.js"
-check "public/config.yaml"
 
 # Source modules
 check "src/remote-tts.js"
@@ -63,14 +62,8 @@ else
   echo "WASM artifacts present"
 fi
 
-# Tokenizer — download if missing
-if [ ! -f "public/tokenizer.model" ]; then
-  echo "public/tokenizer.model missing — downloading..."
-  curl -sL -o public/tokenizer.model \
-    "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tokenizer.model"
-  echo "Downloaded tokenizer.model"
-fi
-check "public/tokenizer.model"
+# Per-language model/tokenizer/voice assets are downloaded lazily by the
+# offscreen document and cached with the extension Cache API.
 
 # Voice avatars
 for voice in alba marius javert jean fantine cosette eponine azelma; do

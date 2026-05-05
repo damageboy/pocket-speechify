@@ -427,7 +427,7 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
       } else if (active === 'Debug') {
         const desc = document.createElement('p');
         desc.className = 'settings-field-desc';
-        desc.textContent = 'Clears the TTS model weights and all downloaded voice files stored in the extension cache (pocket-tts-v1). The model and voices will be re-downloaded on next use.';
+        desc.textContent = 'Clears cached TTS models, tokenizers, and downloaded voice files stored in the extension cache. Assets will be re-downloaded on next use.';
         const btn = document.createElement('button');
         btn.className = 'settings-action-btn';
         btn.textContent = 'Clear Cache';

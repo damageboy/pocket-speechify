@@ -1,7 +1,7 @@
 // src/tts-worker.js
 //
 // WASM TTS worker — loads pocket-tts model and runs streaming inference.
-// Based on babybirdprd/pocket-tts wasm-tts.worker.ts calling conventions.
+// Based on damageboy/pocket-tts v2.1.0 WASM streaming calling conventions.
 //
 // API: WasmTTSModel (load_from_buffer, load_voice_from_safetensors, start_stream)
 //      WasmTTSStream (next_chunk_min_samples, last_chunk_stats)

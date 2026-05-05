@@ -8,7 +8,9 @@
 # 1. Clones damageboy/pocket-tts to a temp directory
 # 2. Builds the WASM target
 # 3. Copies the WASM binary + JS glue into wasm/
-# 4. Downloads the tokenizer model from HuggingFace
+#
+# Per-language model, tokenizer, and voice assets are downloaded and cached
+# lazily by the offscreen document at runtime.
 
 set -euo pipefail
 
@@ -74,17 +76,6 @@ cp "$TMP_DIR/wasm-out/"*.js "$EXT_DIR/public/wasm/pocket_tts.js"
 echo "Copied:"
 ls -lh "$EXT_DIR/public/wasm/"
 
-# Step 4: Download tokenizer
-echo ""
-echo "--- Downloading tokenizer model ---"
-if [ ! -f "$EXT_DIR/public/tokenizer.model" ]; then
-  curl -L -o "$EXT_DIR/public/tokenizer.model" \
-    "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tokenizer.model"
-  echo "Downloaded tokenizer.model ($(wc -c < "$EXT_DIR/public/tokenizer.model") bytes)"
-else
-  echo "tokenizer.model already exists, skipping"
-fi
-
 # Cleanup
 echo ""
 echo "--- Cleaning up ---"
@@ -93,5 +84,5 @@ rm -rf "$TMP_DIR"
 echo ""
 echo "=== Done! WASM artifacts vendored to public/wasm/ ==="
 echo "Next steps:"
-echo "  1. Uncomment WASM integration in src/tts-worker.js"
-echo "  2. Test the extension in Chrome"
+echo "  1. Run npm run build"
+echo "  2. Test multilingual playback in Chrome"
