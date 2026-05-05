@@ -46,19 +46,22 @@ self.onmessage = async (e) => {
 
         // load_from_buffer(config_yaml, weights_data, tokenizer_bytes)
         // - config_yaml: REQUIRED — model architecture definition
-        // - weights_data: the 236MB safetensors file
-        // - tokenizer_bytes: pass empty Uint8Array(0) to use embedded tokenizer.json
+        // - weights_data: safetensors language model weights
+        // - tokenizer_bytes: REQUIRED — sentencepiece tokenizer for v2 language models
         const configBytes = new Uint8Array(msg.configData);
         const weightsBytes = new Uint8Array(msg.modelData);
-        const tokenizerBytes = new Uint8Array(0); // use WASM-embedded tokenizer
+        const tokenizerBytes = new Uint8Array(msg.tokenizerData);
+        if (tokenizerBytes.byteLength === 0) {
+          throw new Error('Tokenizer data is required for pocket-tts v2 language models');
+        }
 
-        diag(`[TTS Worker] Loading: config=${configBytes.byteLength}B, weights=${(weightsBytes.byteLength / 1024 / 1024).toFixed(1)}MB, tokenizer=embedded`);
+        diag(`[TTS Worker] Loading language=${msg.language}: config=${configBytes.byteLength}B, weights=${(weightsBytes.byteLength / 1024 / 1024).toFixed(1)}MB, tokenizer=${tokenizerBytes.byteLength}B`);
         model.load_from_buffer(configBytes, weightsBytes, tokenizerBytes);
 
         sampleRate = model.sample_rate;
         diag(`[TTS Worker] Model loaded. is_ready=${model.is_ready()}, sample_rate=${sampleRate}`);
 
-        self.postMessage({ type: 'model-ready', sampleRate });
+        self.postMessage({ type: 'model-ready', sampleRate, language: msg.language });
       } catch (err) {
         diag(`[TTS Worker] load-model ERROR: ${err}`);
         self.postMessage({ type: 'error', error: String(err) });

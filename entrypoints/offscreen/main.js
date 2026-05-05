@@ -1,6 +1,18 @@
 // offscreen.js
 import { createWordTimingEstimator } from '../../src/word-timing-estimator.js';
 import { createStretchProcessor } from '../../src/stretch-processor.js';
+import {
+  DEFAULT_LANGUAGE_ID,
+  buildLanguageConfigYaml,
+  getDefaultVoiceForLanguage,
+  getModelCacheKey,
+  getTokenizerCacheKey,
+  getVoiceCacheKey,
+  getModelUrl,
+  getTokenizerUrl,
+  getVoiceUrl,
+} from '../../src/languages.js';
+import { getTTSLoadPlan } from '../../src/tts-load-policy.js';
 
 // Signalsmith Stretch — must stay vendored (npm API incompatible).
 // Dynamic import: WASM is embedded in the .mjs, import.meta.url must resolve to public/lib/
@@ -11,9 +23,8 @@ let SignalsmithStretchModule;
 // If Vite bundles this statically, import.meta.url points to wrong location → 404.
 let initTextProcessing, tnNormalizeSentence;
 
-const CACHE_NAME = 'pocket-tts-v1';
+const CACHE_NAME = 'pocket-tts-v2';
 const SAMPLE_RATE = 24000;
-const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 
 // --- Audio pipeline config ---
 const MAX_BUFFERED_SEC = 5; // don't generate more than 5s ahead of playback
@@ -25,6 +36,7 @@ let internalGenCounter = 0;
 let currentSpeed = 1.0;
 let paused = false;
 let currentLoadedVoiceId = null;
+let currentLoadedLanguage = null;
 let currentTabId = null;
 
 // --- Direct WASM stretch processor ---
@@ -36,7 +48,6 @@ let stretchProcessor = null;
 let audioQueue = [];         // [{ data: Float32Array, workerGenId }]
 let scheduledSources = [];   // [{ source, startTime, endTime, rawDuration }]
 let nextStartTime = 0;
-let playbackStartTime = 0;
 let cumulativeScheduledSec = 0;
 let schedulerTimer = null;
 
@@ -165,12 +176,12 @@ async function deleteCache(key) {
 
 // --- Resumable download with progress ---
 
-async function downloadWithProgress(url, cacheKey, asset, voiceId) {
+async function downloadWithProgress(url, cacheKey, asset, voiceId, language) {
   const partialKey = cacheKey + '.partial';
   const metaKey = cacheKey + '.partial-meta';
 
   let startByte = 0;
-  let existingChunks = [];
+  const existingChunks = [];
   const metaResp = await getCached(metaKey);
   if (metaResp) {
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(metaResp)));
@@ -209,7 +220,7 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
       const progressBucket = Math.floor(percent / 2);
       if (progressBucket > lastProgressBucket) {
         lastProgressBucket = progressBucket;
-        sendToServiceWorker({ type: 'download-progress', asset, voiceId, percent });
+        sendToServiceWorker({ type: 'download-progress', asset, voiceId, language, percent });
       }
 
       const checkpointBucket = Math.floor(percent / 10);
@@ -233,8 +244,8 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId) {
   await putCache(cacheKey, fullBuffer.buffer);
   await deleteCache(partialKey);
   await deleteCache(metaKey);
-  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} cached (${(received / 1024 / 1024).toFixed(1)}MB)`);
-  sendToServiceWorker({ type: 'download-complete', asset, voiceId });
+  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''}${language ? ` (${language})` : ''} cached (${(received / 1024 / 1024).toFixed(1)}MB)`);
+  sendToServiceWorker({ type: 'download-complete', asset, voiceId, language });
   return fullBuffer.buffer;
 }
 
@@ -394,7 +405,6 @@ function cancelGeneration(internalGen) {
   audioQueue = [];
   clearPendingWordEvents();
   nextStartTime = 0;
-  playbackStartTime = 0;
   sentenceStartCtxTime = 0;
   cumulativeScheduledSec = 0;
   sentenceAudioSec = 0;
@@ -455,16 +465,70 @@ browser.runtime.onMessage.addListener((msg) => {
         logToSW(`[Offscreen] Cache cleared: ${deleted}`);
         if (worker) { worker.terminate(); worker = null; }
         currentLoadedVoiceId = null;
+        currentLoadedLanguage = null;
       });
       break;
   }
 });
 
+async function getOrDownloadAsset({ cacheKey, url, asset, voiceId = null, language }) {
+  const cachedData = await getCached(cacheKey);
+  if (cachedData) {
+    logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) loaded from cache`);
+    return cachedData;
+  }
+
+  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) not cached, downloading...`);
+  const downloadedData = await downloadWithProgress(url, cacheKey, asset, voiceId, language);
+  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) download complete`);
+  return downloadedData;
+}
+
+async function loadModelAssets(language) {
+  const [modelData, tokenizerData] = await Promise.all([
+    getOrDownloadAsset({
+      cacheKey: getModelCacheKey(language),
+      url: getModelUrl(language),
+      asset: 'model',
+      language,
+    }),
+    getOrDownloadAsset({
+      cacheKey: getTokenizerCacheKey(language),
+      url: getTokenizerUrl(language),
+      asset: 'tokenizer',
+      language,
+    }),
+  ]);
+  const configData = new TextEncoder().encode(buildLanguageConfigYaml(language)).buffer;
+  return { modelData, tokenizerData, configData };
+}
+
+async function loadVoiceAsset(language, voiceId) {
+  return getOrDownloadAsset({
+    cacheKey: getVoiceCacheKey(language, voiceId),
+    url: getVoiceUrl(language, voiceId),
+    asset: 'voice',
+    voiceId,
+    language,
+  });
+}
+
 async function handlePlayParagraph(msg) {
-  const { genId, paragraphText, paragraphIndex, startSentenceIndex,
-          originalSentenceCount, originalWordCount, startParaWordOffset,
-          voiceId, speed, tabId } = msg;
-  logToSW(`[Offscreen] handlePlayParagraph: genId=${genId}, pIdx=${paragraphIndex}, text="${paragraphText?.substring(0, 50)}"`);
+  const {
+    genId,
+    paragraphText,
+    paragraphIndex,
+    startSentenceIndex,
+    originalSentenceCount,
+    originalWordCount,
+    startParaWordOffset,
+    voiceId,
+    language = DEFAULT_LANGUAGE_ID,
+    speed,
+    tabId,
+  } = msg;
+  const effectiveVoiceId = voiceId || getDefaultVoiceForLanguage(language);
+  logToSW(`[Offscreen] handlePlayParagraph: genId=${genId}, pIdx=${paragraphIndex}, language=${language}, voice=${effectiveVoiceId}, text="${paragraphText?.substring(0, 50)}"`);
 
   const isNewGeneration = genId !== currentGenId || tabId !== currentTabId;
   if (isNewGeneration) {
@@ -485,7 +549,6 @@ async function handlePlayParagraph(msg) {
     if (ctx.state === 'suspended') await ctx.resume();
     cumulativeScheduledSec = 0;
     nextStartTime = ctx.currentTime;
-    playbackStartTime = ctx.currentTime;
     totalEstimatedSec = 0;
     totalActualSec = 0;
     timingCalibrationFactor = 1.0;
@@ -496,29 +559,17 @@ async function handlePlayParagraph(msg) {
   // tail audio into the next paragraph's first chunk.
   if (stretchProcessor) stretchProcessor.reset();
 
-  // Ensure model + voice are downloaded
-  const modelKey = `${CACHE_NAME}/model/tts_b6369a24.safetensors`;
-  const voiceKey = `${CACHE_NAME}/voice/${voiceId}.safetensors`;
+  const loadPlan = getTTSLoadPlan({
+    hasWorker: Boolean(worker),
+    currentLoadedLanguage,
+    currentLoadedVoiceId,
+    language,
+    voiceId: effectiveVoiceId,
+  });
 
-  let modelData = await getCached(modelKey);
-  if (!modelData) {
-    logToSW('[Offscreen] Model not cached, downloading (~236MB)...');
-    modelData = await downloadWithProgress(`${HF_BASE}/tts_b6369a24.safetensors`, modelKey, 'model', null);
-    logToSW('[Offscreen] Model download complete');
-  } else {
-    logToSW('[Offscreen] Model loaded from cache');
-  }
-
-  let voiceData = await getCached(voiceKey);
-  if (!voiceData) {
-    logToSW(`[Offscreen] Voice ${voiceId} not cached, downloading...`);
-    voiceData = await downloadWithProgress(`${HF_BASE}/embeddings/${voiceId}.safetensors`, voiceKey, 'voice', voiceId);
-    logToSW(`[Offscreen] Voice ${voiceId} download complete`);
-  } else {
-    logToSW(`[Offscreen] Voice ${voiceId} loaded from cache`);
-  }
-
-  await ensureWorker(modelData, voiceData, voiceId);
+  const modelAssets = loadPlan.loadModel ? await loadModelAssets(language) : null;
+  const voiceData = loadPlan.loadVoice ? await loadVoiceAsset(language, effectiveVoiceId) : null;
+  await ensureWorker(modelAssets, voiceData, effectiveVoiceId, language);
 
   if (!stretchProcessor) {
     const ssModule = await import(browser.runtime.getURL('lib/signalsmith-stretch/SignalsmithStretchModule.mjs'));
@@ -529,7 +580,6 @@ async function handlePlayParagraph(msg) {
 
   if (isNewGeneration) {
     nextStartTime = ctx.currentTime;
-    playbackStartTime = ctx.currentTime;
   }
 
   startScheduler();
@@ -609,7 +659,7 @@ async function handlePlayParagraph(msg) {
       detail: { paragraphIndex, sentenceIndex: origSentIdx, text: normSentText },
     });
 
-    worker.postMessage({ type: 'generate', genId: myInternalGen, text: normSentText, voiceId });
+    worker.postMessage({ type: 'generate', genId: myInternalGen, text: normSentText, voiceId: effectiveVoiceId });
     logToSW(`[Offscreen] Generate norm[${nIdx}]→origSent[${origSentIdx}]: "${normSentText.substring(0, 60)}"`);
 
     // Wait for this sentence's audio to finish playing before moving to the next
@@ -641,27 +691,32 @@ async function handlePlayParagraph(msg) {
   logToSW(`[Offscreen] Paragraph ${paragraphIndex} complete`);
 }
 
-async function ensureWorker(modelData, voiceData, voiceId) {
-  if (!worker) {
+async function ensureWorker(modelAssets, voiceData, voiceId, language) {
+  const mustLoadModel = !worker || currentLoadedLanguage !== language;
+
+  if (mustLoadModel) {
+    if (!modelAssets) throw new Error(`Missing model assets for language ${language}`);
+    const { modelData, tokenizerData, configData } = modelAssets;
+    if (worker) { worker.terminate(); worker = null; }
+    currentLoadedVoiceId = null;
+    currentLoadedLanguage = null;
     worker = new Worker(browser.runtime.getURL('tts-worker.js'));
     worker.onmessage = (e) => handleWorkerMessage(e.data);
     worker.onerror = (e) => {
       logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
     };
-
-    const cfgResp = await fetch(browser.runtime.getURL('config.yaml'));
-    const configData = await cfgResp.arrayBuffer();
     const wasmJsUrl = browser.runtime.getURL('wasm/pocket_tts.js');
-
     worker.postMessage(
-      { type: 'load-model', modelData, configData, wasmJsUrl },
-      [modelData, configData],
+      { type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language },
+      [modelData, tokenizerData, configData],
     );
     await waitForWorkerMessage('model-ready');
+    currentLoadedLanguage = language;
   }
 
   if (currentLoadedVoiceId !== voiceId) {
-    worker.postMessage({ type: 'load-voice', voiceId, voiceData });
+    if (!voiceData) throw new Error(`Missing voice data for ${language}:${voiceId}`);
+    worker.postMessage({ type: 'load-voice', voiceId, voiceData, language });
     await waitForWorkerMessage('voice-ready');
     currentLoadedVoiceId = voiceId;
   }
@@ -774,7 +829,6 @@ function handleResume() {
 
 function handleSetSpeed(newSpeed) {
   currentSpeed = newSpeed;
-  const ctx = getAudioContext();
 
   // Future chunks will be stretched at the new speed.
   // Already-scheduled sources play at 1.0x with their already-stretched data.
