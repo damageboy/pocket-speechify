@@ -584,13 +584,18 @@ async function handlePlayParagraph(msg) {
 
   startScheduler();
 
-  // Expand abbreviations, then normalize full paragraph text before sentence splitting
-  const abbrevMap = await loadAbbreviations();
-  const expandedParaText = expandAbbreviations(paragraphText, abbrevMap);
-  await ensureTextProcessing();
-  const normalizedParaText = tnNormalizeSentence(expandedParaText);
-  if (normalizedParaText !== expandedParaText) {
-    logToSW(`[Offscreen] Para TN: "${expandedParaText.substring(0, 60)}" → "${normalizedParaText.substring(0, 60)}"`);
+  // English-only abbreviation expansion and text normalization before sentence splitting.
+  let normalizedParaText = paragraphText;
+  if (language === 'english') {
+    const abbrevMap = await loadAbbreviations();
+    const expandedParaText = expandAbbreviations(paragraphText, abbrevMap);
+    await ensureTextProcessing();
+    normalizedParaText = tnNormalizeSentence(expandedParaText);
+    if (normalizedParaText !== expandedParaText) {
+      logToSW(`[Offscreen] Para TN: "${expandedParaText.substring(0, 60)}" → "${normalizedParaText.substring(0, 60)}"`);
+    }
+  } else {
+    logToSW(`[Offscreen] Skipping English text normalization for language=${language}`);
   }
 
   // Split normalized paragraph into sentences using abbreviation-aware splitter
