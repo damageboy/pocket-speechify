@@ -6,11 +6,31 @@ A Chrome extension that replicates the Speechify text-to-speech UI as a lightwei
 
 - **Every user interaction (button click, UI event) MUST have a `console.log` message** for debugging. This applies to all event handlers in pill-player.js, side-panels.js, hover-player.js, and any other UI code. Format: `console.log('[Pocket Speechify] <action> clicked/triggered')`.
 
+## Build Scripts
+
+### `scripts/build-wasm.sh`
+
+Builds the pocket-tts WASM binary and vendors it into `public/wasm/`. By default it clones `babybirdprd/pocket-tts` from GitHub into a temp directory.
+
+Set `POCKET_TTS_REPO` to use a **local checkout** instead — skip the clone and build from that directory directly:
+
+```bash
+# One-off
+POCKET_TTS_REPO=~/projects/pocket-tts npm run build:wasm
+
+# Or export for the session
+export POCKET_TTS_REPO=~/projects/pocket-tts
+npm run build:wasm
+```
+
+The local repo is never modified. The temp staging dir for wasm-pack/wasm-bindgen output is always created and cleaned up regardless.
+
 ## Extension Architecture & Context Boundaries
 
 There are 4 execution contexts. Each has different API access. **Never assume an API from one context works in another.**
 
-### Content Script (content.js, src/*.js loaded via import)
+### Content Script (content.js, src/\*.js loaded via import)
+
 - **Runs in:** the web page's JS context (injected by Chrome)
 - **Has access to:** DOM, `chrome.runtime.sendMessage()`, `chrome.runtime.onMessage`
 - **Does NOT have:** Cache API (operates on page origin, not extension origin), `chrome.offscreen`, `chrome.tabs`, AudioContext for TTS
@@ -18,6 +38,7 @@ There are 4 execution contexts. Each has different API access. **Never assume an
 - **Files:** `content.js`, `src/remote-tts.js`, `src/pill-player.js`, `src/side-panels.js`, `src/highlight.js`, `src/hover-player.js`, `src/scroll-nav.js`, `src/state.js`, `src/voices.js`, `src/content-extractor.js`, `src/icons.js`, `src/dom-utils.js`, `src/logger.js`, `src/mock-tts.js`
 
 ### Service Worker (service-worker.js)
+
 - **Runs in:** extension background context
 - **Has access to:** `chrome.runtime`, `chrome.tabs`, `chrome.offscreen`, `chrome.runtime.getContexts()`
 - **Does NOT have:** DOM, `window`, AudioContext, Cache API (technically available but should NOT be used here — offscreen doc owns caching)
@@ -25,6 +46,7 @@ There are 4 execution contexts. Each has different API access. **Never assume an
 - **Role:** message router only. Routes messages between content scripts and offscreen document using `source` field tagging.
 
 ### Offscreen Document (offscreen.html, offscreen.js)
+
 - **Runs in:** extension origin, hidden page
 - **Has access to:** Cache API (extension origin), AudioContext, Web Workers, `chrome.runtime.sendMessage()`, `chrome.runtime.onMessage`, `chrome.runtime.getURL()`, full DOM APIs, ES module imports
 - **Does NOT have:** `chrome.tabs`, visible UI
@@ -32,6 +54,7 @@ There are 4 execution contexts. Each has different API access. **Never assume an
 - **Role:** owns audio playback, weight/voice caching, download lifecycle, word timing estimation, spawns and manages the TTS worker
 
 ### TTS Web Worker (src/tts-worker.js)
+
 - **Runs in:** worker thread spawned by offscreen document
 - **Has access to:** `self.postMessage()`, `self.onmessage`, `importScripts()`, dynamic `import()` (can import `chrome-extension://` URLs passed to it), `console.log` (visible in offscreen doc's DevTools)
 - **Does NOT have:** `chrome.*` APIs (no `chrome.runtime`, no `chrome.runtime.getURL()`), DOM, Cache API, AudioContext
@@ -39,6 +62,7 @@ There are 4 execution contexts. Each has different API access. **Never assume an
 - **Role:** WASM inference only. Receives model weights, config, voice data, and text via `postMessage`. Sends back audio chunks.
 
 ### Message Routing Pattern
+
 ```
 Content Script ──(chrome.runtime.sendMessage)──► Service Worker
     source: 'content'                               │
@@ -94,6 +118,7 @@ All reference screenshots are in `./screenshots/`.
 The core UI is a **vertical floating bar** on the right edge of the viewport.
 
 **Layout & Position:**
+
 - `position: fixed`
 - `z-index: 2147483645` (near max int)
 - `top: calc(50% - 171px)`, `right: 18px`
@@ -101,6 +126,7 @@ The core UI is a **vertical floating bar** on the right edge of the viewport.
 - `cursor: move` (draggable)
 
 **Visual Style:**
+
 - Background: `#1f1f1f` (dark)
 - Shape: `border-radius: 100px` (pill/capsule)
 - Box shadow: subtle purple glow — `rgba(106, 120, 252, 0.5)` layered at multiple blur radii
@@ -185,6 +211,7 @@ When the user hovers over the pill, it **expands vertically** from ~230px to ~45
     - Visually separated from the group above, acts as dismiss
 
 **Expansion behavior:**
+
 - The bottom section (`pill-player-bottom-section`) animates opacity: starts at 0 during the height transition, then fades to 1
 - Class `.animating` is added during transition (opacity 0), removed when complete (opacity 1)
 - `transition: opacity 0.05s ease-in-out forwards`
@@ -194,6 +221,7 @@ When the user hovers over the pill, it **expands vertically** from ~230px to ~45
 When clicking voice or speed buttons, a panel slides out to the left of the pill.
 
 **Shared Panel Design:**
+
 - Background: `#1f1f1f`
 - `border-radius: 12px`
 - `position: absolute`, `right: 60px`, `top: -12px`
@@ -202,6 +230,7 @@ When clicking voice or speed buttons, a panel slides out to the left of the pill
 - Font: `system-ui, sans-serif`
 
 **Voice Panel (~400x510px):**
+
 - Search bar at top with magnifying glass icon
 - "Language" dropdown filter with chevron
 - "Recents" section — list of recently used voices
@@ -213,6 +242,7 @@ When clicking voice or speed buttons, a panel slides out to the left of the pill
 - Recents show small 32px avatars; Featured show larger 64px avatars
 
 **Speed Panel (~360x422px):**
+
 - Header: "Normal" label + "Duration: ~MM:SS" estimate
 - Speed display with +/- buttons: minus `[ - ]` current speed `[ + ]` plus
 - Preset speed buttons: `0.8x`, `1x`, `1.2x`
@@ -224,33 +254,33 @@ When clicking voice or speed buttons, a panel slides out to the left of the pill
 
 ```css
 /* Backgrounds */
---bg-primary:       #1f1f1f;  /* Main surfaces */
---bg-primary-dark:  #121212;  /* Deeper surfaces */
---bg-hover:         #363636;  /* Hover states */
---bg-active:        #3d3d3d;  /* Active/pressed states */
---bg-divider:       #2e2e2e;  /* Dividers, borders */
---bg-cta:           #4759f7;  /* CTA / play button */
---bg-cta-hover:     #4454e3;  /* CTA hover */
---bg-cta-active:    #3d4ac4;  /* CTA pressed */
+--bg-primary: #1f1f1f; /* Main surfaces */
+--bg-primary-dark: #121212; /* Deeper surfaces */
+--bg-hover: #363636; /* Hover states */
+--bg-active: #3d3d3d; /* Active/pressed states */
+--bg-divider: #2e2e2e; /* Dividers, borders */
+--bg-cta: #4759f7; /* CTA / play button */
+--bg-cta-hover: #4454e3; /* CTA hover */
+--bg-cta-active: #3d4ac4; /* CTA pressed */
 
 /* Text & Icons */
---text-primary:     #ffffff;  /* Primary text, icons */
---text-secondary:   #9f9f9f;  /* Secondary / muted text */
---text-tertiary:    #7a7a7a;  /* Tertiary text */
+--text-primary: #ffffff; /* Primary text, icons */
+--text-secondary: #9f9f9f; /* Secondary / muted text */
+--text-tertiary: #7a7a7a; /* Tertiary text */
 
 /* Accent & Highlights */
---accent-blue:      #5c6ae5;  /* Secondary CTA */
---electric-blue:    #8894fe;  /* Active states, highlights */
---highlight-primary:#5666f0;  /* Text being read */
---highlight-hover:  #e68600;  /* Hover highlight */
+--accent-blue: #5c6ae5; /* Secondary CTA */
+--electric-blue: #8894fe; /* Active states, highlights */
+--highlight-primary: #5666f0; /* Text being read */
+--highlight-hover: #e68600; /* Hover highlight */
 
 /* Semantic */
---color-success:    #23ae75;
---color-alert:      #e68600;
---color-critical:   #eb3830;
+--color-success: #23ae75;
+--color-alert: #e68600;
+--color-critical: #eb3830;
 
 /* Overlay */
---dimmer:           rgba(0, 0, 0, 0.4);
+--dimmer: rgba(0, 0, 0, 0.4);
 ```
 
 ### Pill Player — Playing State
@@ -286,25 +316,27 @@ During playback, the pill player changes:
 Speechify uses the **CSS Houdini Paint Worklet** for highlighting text during playback. This is a high-performance approach that avoids DOM manipulation.
 
 **How it works:**
+
 - Sets `background-image: paint(speechifyPlaybackHighlighter)` on the paragraph being read
 - Passes highlight coordinates via CSS custom properties
 - The paint worklet draws colored rectangles behind the text
 
 **CSS Custom Properties on the active paragraph:**
 
-| Property | Purpose | Example |
-|----------|---------|---------|
-| `--speechifyPlaybackHighlighterElemColor` | Base element color for dark/light detection | `rgb(34, 40, 49)` |
-| `--speechifyPlaybackHighlighterHighlightSentenceInfo` | Comma-separated rect coords (x,y,w,h tuples) for sentence highlight | `528.9,123,451.8,26.4,...` |
-| `--speechifyPlaybackHighlighterHighlightWordInfo` | Single rect (x,y,w,h) for current word | `343.98,243,97.47,26.4` |
-| `--speechifyPlaybackHighlighterHighlightWordClipInfo` | Clip rect for word animation | Same format as WordInfo |
-| `--speechifyPlaybackHighlighterSentenceHighlightColorDark` | Sentence highlight (dark mode) | `#444766` |
-| `--speechifyPlaybackHighlighterSentenceHighlightColorLight` | Sentence highlight (light mode) | `#e0e3ff` |
-| `--speechifyPlaybackHighlighterWordHighlightColorDark` | Word highlight (dark mode) | `#5666f0` |
-| `--speechifyPlaybackHighlighterWordHighlightColorLight` | Word highlight (light mode) | `#abb3fe` |
-| `--speechifyPlaybackHighlighterElemMatrix` | Transform matrix | `1,1,0,0,0,0` |
+| Property                                                    | Purpose                                                             | Example                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------- |
+| `--speechifyPlaybackHighlighterElemColor`                   | Base element color for dark/light detection                         | `rgb(34, 40, 49)`          |
+| `--speechifyPlaybackHighlighterHighlightSentenceInfo`       | Comma-separated rect coords (x,y,w,h tuples) for sentence highlight | `528.9,123,451.8,26.4,...` |
+| `--speechifyPlaybackHighlighterHighlightWordInfo`           | Single rect (x,y,w,h) for current word                              | `343.98,243,97.47,26.4`    |
+| `--speechifyPlaybackHighlighterHighlightWordClipInfo`       | Clip rect for word animation                                        | Same format as WordInfo    |
+| `--speechifyPlaybackHighlighterSentenceHighlightColorDark`  | Sentence highlight (dark mode)                                      | `#444766`                  |
+| `--speechifyPlaybackHighlighterSentenceHighlightColorLight` | Sentence highlight (light mode)                                     | `#e0e3ff`                  |
+| `--speechifyPlaybackHighlighterWordHighlightColorDark`      | Word highlight (dark mode)                                          | `#5666f0`                  |
+| `--speechifyPlaybackHighlighterWordHighlightColorLight`     | Word highlight (light mode)                                         | `#abb3fe`                  |
+| `--speechifyPlaybackHighlighterElemMatrix`                  | Transform matrix                                                    | `1,1,0,0,0,0`              |
 
 **Visual result:**
+
 - **Sentence highlight**: dark blue-gray background (`#444766`) spanning the entire sentence being read
 - **Word highlight**: brighter blue (`#5666f0`) on the individual word currently being spoken
 - Word highlight animates/moves from word to word as speech progresses
@@ -334,12 +366,14 @@ Appears when hovering over a paragraph during idle state (not during playback).
 A small floating pill that appears at the **top or bottom center** of the viewport when the user scrolls away from the currently-read text. Clicking it scrolls back to the highlighted paragraph.
 
 **Layout:**
+
 - `position: fixed`, `z-index: 2147483646`
 - Centered horizontally: `left: 50%`, `transform: translateX(-50%)`
 - **Top version**: `top: 16px`, `margin-top: -30px` (slides in from above)
 - **Bottom version**: `transform: translate(-50%, -100%)`, `margin-top: 30px` (slides in from below)
 
 **Visual:**
+
 - Background: `var(--speechify-bg-prim-w-80)` → `#2e2e2e`
 - `border-radius: 10px`
 - `padding: 4px`
@@ -349,6 +383,7 @@ A small floating pill that appears at the **top or bottom center** of the viewpo
 - Starts at `opacity: 0`, animates to `opacity: 1`
 
 **Components (horizontal layout with `gap: 2px`):**
+
 1. **Up/Down arrow** — 17x17px chevron SVG, `color: var(--speechify-icn-txt-prim)` (#ffffff)
    - Top widget: arrow rotated 180deg (points up)
    - Bottom widget: arrow points down
@@ -372,11 +407,13 @@ A small floating pill that appears at the **top or bottom center** of the viewpo
 ### Key SVG Icons
 
 **Play icon** (viewBox 0 0 24 24):
+
 ```
 M7.164 19.84c.474 0 .835-.088 1.283-.36l9.826-5.705c.844-.483 1.336-.958 1.336-1.775 0-.809-.492-1.292-1.336-1.775L8.447 4.52c-.448-.263-.809-.36-1.283-.36-.95 0-1.714.677-1.714 1.907v11.866c0 1.23.765 1.907 1.714 1.907z
 ```
 
 **Waveform/Summarize icon** (viewBox 0 0 20 20, 5 vertical bars):
+
 ```
 M10 6.66663L10 15 (center, tallest)
 M3.33301 8.33337L3.33301 10.8334 (left, shortest)
@@ -386,40 +423,47 @@ M13.333 5L13.333 12.5 (right-center)
 ```
 
 **Close (X) icon** (viewBox 0 0 20 20):
+
 ```
 M4.87361 3.45952C4.48309 3.06899 3.84992 3.06899 3.4594 3.45952...
 ```
 
 **Search icon** (viewBox 0 0 20 20):
+
 ```
 M14 9C14 11.7614 11.7614 14 9 14C6.23858 14 4 11.7614 4 9...
 ```
 
 **Pause icon** (viewBox 0 0 10 12, two vertical bars):
+
 ```
 Bar 1: M0 1C0 0.447715 0.447715 0 1 0H3C3.55228 0 4 0.447715 4 1V11C4 11.5523 3.55228 12 3 12H1C0.447715 12 0 11.5523 0 11V1Z
 Bar 2: M6 1C6 0.447715 6.44772 0 7 0H9C9.55228 0 10 0.447715 10 1V11C10 11.5523 9.55228 12 9 12H7C6.44772 12 6 11.5523 6 11V1Z
 ```
 
 **Hover player play icon** (viewBox 0 0 24 24, circle + triangle):
+
 ```
 Circle: cx="12" cy="12" r="12" fill="#4759F7"
 Triangle: M16.5 11.134C17.1667 11.5189 17.1667 12.4811 16.5 12.866L10.5 16.3301C9.83333 16.715 9 16.2339 9 15.4641L9 8.53592C9 7.76611 9.83333 7.28499 10.5 7.66989L16.5 11.134Z (fill white)
 ```
 
 **Skip backward** (viewBox 0 0 16 16, double left chevron):
+
 ```
 M7.48552 5.81939...L3.64545 7.53812...L6.42486 11.3782...L5.23644 8.06845L7.48552 5.81939Z
 M12.0343 5.81939...L8.19428 7.53812...L10.9737 11.3782...L9.78527 8.06845L12.0343 5.81939Z
 ```
 
 **Skip forward** (viewBox 0 0 16 16, double right chevron):
+
 ```
 M3.96576 4.75873...L7.80583 7.53814...L5.02642 11.3782...L6.21484 8.06847L3.96576 5.81939Z
 M8.5145 4.75873...L12.3546 7.53814...L9.57516 11.3782...L10.7636 8.06847L8.5145 5.81939Z
 ```
 
 **Chevron (scroll-to-highlight arrow)** (viewBox 0 0 17 17):
+
 ```
 M12.7803 6.96967C13.0732 7.26256 13.0732 7.73744 12.7803 8.03033L8.78033 12.0303C8.63968 12.171 8.44891 12.25 8.25 12.25C8.05109 12.25 7.86032 12.171 7.71967 12.0303L3.71967 8.03033C3.42678 7.73744 3.42678 7.26256 3.71967 6.96967C4.01256 6.67678 4.48744 6.67678 4.78033 6.96967L8.25 10.4393L11.7197 6.96967C12.0126 6.67678 12.4874 6.67678 12.7803 6.96967Z
 ```
@@ -427,26 +471,31 @@ M12.7803 6.96967C13.0732 7.26256 13.0732 7.73744 12.7803 8.03033L8.78033 12.0303
 ## Implementation Plan
 
 ### Phase 1: Chrome Extension Scaffold
+
 - `manifest.json` (Manifest V3)
 - Content script that injects the pill player into pages
 - Shadow DOM for style isolation
 
 ### Phase 2: Pill Player UI
+
 - Vertical floating bar with all 6 components
 - Drag to reposition
 - Slide-in animation on load
 - Dark theme matching Speechify's design tokens
 
 ### Phase 3: Side Panels
+
 - Voice selection panel (can use browser's built-in `speechSynthesis.getVoices()`)
 - Speed control panel with slider and presets
 
 ### Phase 4: TTS Engine
+
 - Use Web Speech API (`SpeechSynthesisUtterance`) for text-to-speech
 - Extract readable text from page (similar to reader mode)
 - Track current sentence and word boundaries via `SpeechSynthesisUtterance` `boundary` event
 
 ### Phase 5: Text Highlighting
+
 - Highlight current sentence with background overlay (`#444766` dark, `#e0e3ff` light)
 - Highlight current word with brighter color (`#5666f0` dark, `#abb3fe` light)
 - Use `Range.getBoundingClientRect()` to get text positions
@@ -454,18 +503,21 @@ M12.7803 6.96967C13.0732 7.26256 13.0732 7.73744 12.7803 8.03033L8.78033 12.0303
 - Auto-scroll to keep highlighted text in view
 
 ### Phase 6: Playback State UI
+
 - Swap play → pause icon with circular progress ring
 - Show skip sentence backward/forward buttons (16x16 double chevrons)
 - Update duration counter with remaining time
 - Show hover player progress bar (3px gradient) during paragraph playback
 
 ### Phase 7: Hover Player (Paragraph Play)
+
 - Detect paragraph hover via `mouseenter`/`mouseleave` on `<p>` elements
 - Show 28x28px floating play button at left edge of hovered paragraph
 - Click to start reading from that paragraph
 - fadeIn/fadeOut animations (100ms/200ms)
 
 ### Phase 8: Scroll-to-Highlight Navigation
+
 - When user scrolls away from highlighted text, show navigation pill
 - Top pill (arrow up) when highlight is above viewport
 - Bottom pill (arrow down) when highlight is below

@@ -18,17 +18,23 @@ TMP_DIR=$(mktemp -d)
 
 echo "=== Building pocket-tts WASM ==="
 echo "Extension dir: $EXT_DIR"
-echo "Temp dir: $TMP_DIR"
 
-# Step 1: Clone
-echo ""
-echo "--- Cloning babybirdprd/pocket-tts ---"
-git clone --depth 1 https://github.com/babybirdprd/pocket-tts "$TMP_DIR/pocket-tts"
+# Step 1: Source — use local override if POCKET_TTS_REPO is set
+if [ -n "${POCKET_TTS_REPO:-}" ]; then
+  SRC_DIR="$(cd "$POCKET_TTS_REPO" && pwd)"
+  echo "Using local repo: $SRC_DIR  (POCKET_TTS_REPO override)"
+else
+  SRC_DIR="$TMP_DIR/pocket-tts"
+  echo "Temp dir: $TMP_DIR"
+  echo ""
+  echo "--- Cloning babybirdprd/pocket-tts ---"
+  git clone --depth 1 https://github.com/babybirdprd/pocket-tts "$SRC_DIR"
+fi
 
 # Step 2: Build WASM
 echo ""
 echo "--- Building WASM (release) ---"
-cd "$TMP_DIR/pocket-tts"
+cd "$SRC_DIR"
 
 # Check if wasm-pack is available, fall back to cargo + wasm-bindgen
 if command -v wasm-pack &> /dev/null; then
@@ -52,7 +58,7 @@ else
 
   mkdir -p "$TMP_DIR/wasm-out"
   wasm-bindgen \
-    target/wasm32-unknown-unknown/release/pocket_tts.wasm \
+    "$SRC_DIR/target/wasm32-unknown-unknown/release/pocket_tts.wasm" \
     --out-dir "$TMP_DIR/wasm-out" \
     --target web \
     --no-typescript

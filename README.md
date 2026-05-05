@@ -60,14 +60,14 @@ Then load the directory as an unpacked extension.
 
 ### Controls
 
-| Control | Action |
-|---------|--------|
-| **▶ / ⏸** | Play / Pause |
-| **⏭ / ⏮** | Skip forward / backward one sentence |
-| **Speed button** | Open speed panel (0.4x–4.5x, pitch-preserved) |
-| **Voice button** | Open voice selector |
-| **Hover over paragraph** | Shows play button to start from that paragraph |
-| **Scroll-nav pill** | Appears when you scroll away from the highlighted text — click to jump back |
+| Control                  | Action                                                                      |
+| ------------------------ | --------------------------------------------------------------------------- |
+| **▶ / ⏸**                | Play / Pause                                                                |
+| **⏭ / ⏮**              | Skip forward / backward one sentence                                        |
+| **Speed button**         | Open speed panel (0.4x–4.5x, pitch-preserved)                               |
+| **Voice button**         | Open voice selector                                                         |
+| **Hover over paragraph** | Shows play button to start from that paragraph                              |
+| **Scroll-nav pill**      | Appears when you scroll away from the highlighted text — click to jump back |
 
 ---
 
@@ -129,12 +129,27 @@ pre-commit install
 
 ### Build scripts
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/build-wasm.sh` | Build pocket-tts WASM from source |
-| `scripts/verify-build.sh` | Check all required files are present |
+| Script                     | Purpose                                    |
+| -------------------------- | ------------------------------------------ |
+| `scripts/build-wasm.sh`    | Build pocket-tts WASM from source          |
+| `scripts/verify-build.sh`  | Check all required files are present       |
 | `scripts/stamp-version.sh` | Stamp `manifest.json` version from git tag |
-| `scripts/package.sh` | Create `.zip` for Chrome Web Store |
+| `scripts/package.sh`       | Create `.zip` for Chrome Web Store         |
+
+#### Building WASM from a local pocket-tts checkout
+
+By default `build-wasm.sh` clones `babybirdprd/pocket-tts` from GitHub into a temp directory. Set `POCKET_TTS_REPO` to point at a local checkout instead — useful when iterating on the TTS engine without publishing a new release:
+
+```bash
+# One-off
+POCKET_TTS_REPO=~/projects/pocket-tts npm run build:wasm
+
+# Or export for the whole shell session
+export POCKET_TTS_REPO=~/projects/pocket-tts
+npm run build:wasm
+```
+
+The local repo is **never modified** — only read from. The temp staging directory for WASM artifacts is still created and cleaned up as usual.
 
 ### CI
 
