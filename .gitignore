@@ -15,3 +15,6 @@ docs/superpowers/
 
 node_modules/
 .output/
+
+# Git worktrees
+.worktrees/
