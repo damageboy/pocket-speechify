@@ -33,6 +33,7 @@ let audioCtx = null;
 let worker = null;
 let currentGenId = -1;
 let internalGenCounter = 0;
+let activeLoadToken = 0;
 let currentSpeed = 1.0;
 let paused = false;
 let currentLoadedVoiceId = null;
@@ -454,6 +455,7 @@ browser.runtime.onMessage.addListener((msg) => {
       break;
     case 'tts-cancel':
       internalGenCounter++;
+      activeLoadToken++;
       cancelGeneration(internalGenCounter - 1);
       currentGenId = msg.genId;
       break;
@@ -461,6 +463,7 @@ browser.runtime.onMessage.addListener((msg) => {
       handleSetSpeed(msg.speed);
       break;
     case 'tts-clear-cache':
+      activeLoadToken++;
       caches.delete(CACHE_NAME).then(deleted => {
         logToSW(`[Offscreen] Cache cleared: ${deleted}`);
         if (worker) { worker.terminate(); worker = null; }
@@ -541,6 +544,7 @@ async function handlePlayParagraph(msg) {
   currentGenId = genId;
   currentSpeed = speed;
   const myInternalGen = internalGenCounter;
+  const myLoadToken = ++activeLoadToken;
 
   const ctx = getAudioContext();
 
@@ -569,7 +573,10 @@ async function handlePlayParagraph(msg) {
 
   const modelAssets = loadPlan.loadModel ? await loadModelAssets(language) : null;
   const voiceData = loadPlan.loadVoice ? await loadVoiceAsset(language, effectiveVoiceId) : null;
-  await ensureWorker(modelAssets, voiceData, effectiveVoiceId, language);
+  if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
+
+  const workerReady = await ensureWorker(modelAssets, voiceData, effectiveVoiceId, language, myInternalGen, myLoadToken);
+  if (!workerReady || myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 
   if (!stretchProcessor) {
     const ssModule = await import(browser.runtime.getURL('lib/signalsmith-stretch/SignalsmithStretchModule.mjs'));
@@ -577,6 +584,7 @@ async function handlePlayParagraph(msg) {
     stretchProcessor = await createStretchProcessor(SignalsmithStretchModule, SAMPLE_RATE, 1);
     logToSW('[Offscreen] StretchProcessor initialized (direct WASM)');
   }
+  if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 
   if (isNewGeneration) {
     nextStartTime = ctx.currentTime;
@@ -598,6 +606,8 @@ async function handlePlayParagraph(msg) {
     logToSW(`[Offscreen] Skipping English text normalization for language=${language}`);
   }
 
+  if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
+
   // Split normalized paragraph into sentences using abbreviation-aware splitter
   const normSentences = splitSentencesOffscreen(normalizedParaText);
   const normTotal = normSentences.length;
@@ -618,7 +628,7 @@ async function handlePlayParagraph(msg) {
   }
 
   for (let nIdx = startNormIdx; nIdx < normSentences.length; nIdx++) {
-    if (myInternalGen !== internalGenCounter) return;
+    if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 
     const normSentText = normSentences[nIdx].trim();
     if (!normSentText) continue;
@@ -671,7 +681,7 @@ async function handlePlayParagraph(msg) {
     await new Promise(resolve => { sentenceDoneResolve = resolve; });
     sentenceDoneResolve = null;
 
-    if (myInternalGen !== internalGenCounter) return;
+    if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 
     // Advance paragraph-level word offset by the number of words just spoken
     paraWordOffset += numNormWords;
@@ -696,12 +706,18 @@ async function handlePlayParagraph(msg) {
   logToSW(`[Offscreen] Paragraph ${paragraphIndex} complete`);
 }
 
-async function ensureWorker(modelAssets, voiceData, voiceId, language) {
+async function ensureWorker(modelAssets, voiceData, voiceId, language, requestInternalGen, loadToken) {
+  const isCurrent = () => requestInternalGen === internalGenCounter && loadToken === activeLoadToken;
+  const isStaleLoadError = (err) => err?.name === 'StaleWorkerWait';
+
+  if (!isCurrent()) return false;
+
   const mustLoadModel = !worker || currentLoadedLanguage !== language;
 
   if (mustLoadModel) {
     if (!modelAssets) throw new Error(`Missing model assets for language ${language}`);
     const { modelData, tokenizerData, configData } = modelAssets;
+    if (!isCurrent()) return false;
     if (worker) { worker.terminate(); worker = null; }
     currentLoadedVoiceId = null;
     currentLoadedLanguage = null;
@@ -711,40 +727,113 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language) {
       logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
     };
     const wasmJsUrl = browser.runtime.getURL('wasm/pocket_tts.js');
-    worker.postMessage(
+    const workerForLoad = worker;
+    workerForLoad.postMessage(
       { type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language },
       [modelData, tokenizerData, configData],
     );
-    await waitForWorkerMessage('model-ready');
+    if (!isCurrent()) return false;
+    try {
+      await waitForWorkerMessage('model-ready', 30000, workerForLoad, isCurrent);
+    } catch (err) {
+      if (isStaleLoadError(err)) return false;
+      throw err;
+    }
+    if (!isCurrent() || workerForLoad !== worker) return false;
     currentLoadedLanguage = language;
   }
 
+  if (!isCurrent()) return false;
+
   if (currentLoadedVoiceId !== voiceId) {
     if (!voiceData) throw new Error(`Missing voice data for ${language}:${voiceId}`);
-    worker.postMessage({ type: 'load-voice', voiceId, voiceData, language });
-    await waitForWorkerMessage('voice-ready');
+    const workerForVoice = worker;
+    if (!workerForVoice) throw new Error('Worker missing while loading voice');
+    workerForVoice.postMessage({ type: 'load-voice', voiceId, voiceData, language });
+    if (!isCurrent()) return false;
+    try {
+      await waitForWorkerMessage('voice-ready', 30000, workerForVoice, isCurrent);
+    } catch (err) {
+      if (isStaleLoadError(err)) return false;
+      throw err;
+    }
+    if (!isCurrent() || workerForVoice !== worker) return false;
     currentLoadedVoiceId = voiceId;
   }
+
+  return true;
 }
 
-function waitForWorkerMessage(expectedType, timeoutMs = 30000) {
+function waitForWorkerMessage(expectedType, timeoutMs = 30000, workerInstance = worker, isCurrent = () => true) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      worker.removeEventListener('message', handler);
-      reject(new Error(`Timeout waiting for worker message: ${expectedType}`));
-    }, timeoutMs);
-    const handler = (e) => {
-      if (e.data.type === expectedType) {
-        clearTimeout(timer);
-        worker.removeEventListener('message', handler);
-        resolve(e.data);
-      } else if (e.data.type === 'error') {
-        clearTimeout(timer);
-        worker.removeEventListener('message', handler);
-        reject(new Error(e.data.error || 'Worker error during ' + expectedType));
+    const targetWorker = workerInstance;
+    if (!targetWorker) {
+      reject(new Error(`Worker missing while waiting for worker message: ${expectedType}`));
+      return;
+    }
+
+    let settled = false;
+    let timer = null;
+    let staleCheckTimer = null;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      if (staleCheckTimer) clearInterval(staleCheckTimer);
+      targetWorker.removeEventListener('message', handler);
+    };
+
+    const finishResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const finishReject = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+
+    const currentCheck = () => {
+      try {
+        return isCurrent();
+      } catch (_) {
+        return false;
       }
     };
-    worker.addEventListener('message', handler);
+
+    const finishStale = () => {
+      const err = new Error(`Stale worker wait while waiting for worker message: ${expectedType}`);
+      err.name = 'StaleWorkerWait';
+      finishReject(err);
+    };
+
+    function handler(e) {
+      if (!currentCheck()) {
+        finishStale();
+        return;
+      }
+      if (e.data.type === expectedType) {
+        finishResolve(e.data);
+      } else if (e.data.type === 'error') {
+        finishReject(new Error(e.data.error || 'Worker error during ' + expectedType));
+      }
+    }
+
+    if (!currentCheck()) {
+      finishStale();
+      return;
+    }
+
+    targetWorker.addEventListener('message', handler);
+    timer = setTimeout(() => {
+      finishReject(new Error(`Timeout waiting for worker message: ${expectedType}`));
+    }, timeoutMs);
+    staleCheckTimer = setInterval(() => {
+      if (!currentCheck()) finishStale();
+    }, 50);
   });
 }
 
