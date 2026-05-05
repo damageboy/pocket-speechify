@@ -12,6 +12,7 @@
     "package": "wxt zip"
   },
   "dependencies": {
+    "tldts": "^7.0.30",
     "wxt": "^0.20.20"
   },
   "devDependencies": {
