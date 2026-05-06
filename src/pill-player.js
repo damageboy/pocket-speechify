@@ -126,8 +126,9 @@ function createSkipButtons(actions) {
   return skipRow;
 }
 
-export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHistory = []) {
-  const hasContent = paragraphs.length > 0;
+export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHistory = [], options = {}) {
+  const hasContent = options.hasPlayableContent ?? paragraphs.length > 0;
+  const initiallyVisible = options.initiallyVisible ?? true;
 
   // --- Persisted settings ---
   const SETTINGS_KEY = 'pocket-speechify-settings';
@@ -144,6 +145,9 @@ export async function initPillPlayer(shadow, state, actions, paragraphs, ttsHist
   const pill = document.createElement('div');
   pill.className = 'pill-container';
   pill.style.setProperty('--pill-scale', settings.scale);
+  if (!initiallyVisible) {
+    pill.style.display = 'none';
+  }
 
   // --- Pill main section ---
   const pillMain = document.createElement('div');
