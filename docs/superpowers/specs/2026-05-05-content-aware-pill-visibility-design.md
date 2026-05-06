@@ -128,7 +128,8 @@ The detector decides default visibility and manual-play eligibility. `content-ex
    ```js
    initPillPlayer(shadow, state, actions, paragraphs, ttsHistory, {
      initiallyVisible: detection.isReadableArticle,
-     hasPlayableContent: detection.isReadableArticle || detection.canPlayBestEffort,
+     hasPlayableContent:
+       detection.isReadableArticle || detection.canPlayBestEffort,
    });
    ```
 
