@@ -123,7 +123,7 @@ function isProseLikeBlock(paragraph) {
 	const text = normalizeText(paragraph.text);
 	const wordCount = getWordCount(paragraph);
 	if (text.length < 40 || wordCount < 8) return false;
-	if (HEADING_TAGS.has(tagName) && !/[.!?]$/.test(text)) return false;
+	if (HEADING_TAGS.has(tagName) && !/[.!?]/.test(text)) return false;
 
 	return true;
 }

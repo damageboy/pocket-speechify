@@ -97,6 +97,23 @@ describe("detectReadableArticle", () => {
 		expect(result.canPlayBestEffort).toBe(false);
 	});
 
+	it("counts prose-like headings with sentence punctuation before the final character", () => {
+		setPageHtml({
+			body: `
+        <article>
+          <h1>This substantial heading asks why? readers should continue today</h1>
+          <p>${proseParagraph(80, "First")}</p>
+          <p>${proseParagraph(80, "Second")}</p>
+        </article>
+      `,
+		});
+
+		const result = detectPage();
+
+		expect(result.canPlayBestEffort).toBe(true);
+		expect(result.proseParagraphIndexes).toContain(0);
+	});
+
 	it("auto-shows strong body-only prose without metadata", () => {
 		setPageHtml({
 			body: `
