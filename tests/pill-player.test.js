@@ -27,7 +27,12 @@ async function renderPill({ paragraphs = [], options } = {}) {
 
 	await initPillPlayer(shadow, state, actions, paragraphs, [], options);
 
-	return { shadow, state, actions, pill: shadow.querySelector(".pill-container") };
+	return {
+		shadow,
+		state,
+		actions,
+		pill: shadow.querySelector(".pill-container"),
+	};
 }
 
 beforeEach(() => {
@@ -42,7 +47,10 @@ beforeEach(() => {
 			},
 		},
 		runtime: {
-			getManifest: vi.fn(() => ({ name: "Pocket Speechify", version: "0.0.0" })),
+			getManifest: vi.fn(() => ({
+				name: "Pocket Speechify",
+				version: "0.0.0",
+			})),
 			sendMessage: vi.fn(),
 		},
 	});
