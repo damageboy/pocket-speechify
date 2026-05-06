@@ -1,6 +1,7 @@
 import { log } from '../src/logger.js';
 import { createState } from '../src/state.js';
 import { extractContent } from '../src/content-extractor.js';
+import { detectReadableArticle } from '../src/article-detector.js';
 import { RemoteTTS } from '../src/remote-tts.js';
 import { initPillPlayer } from '../src/pill-player.js';
 import { initSidePanels } from '../src/side-panels.js';
@@ -46,6 +47,11 @@ export default defineContentScript({
 
     const paragraphs = extractContent();
     log.info(`Extracted ${paragraphs.length} paragraphs`);
+    const articleDetection = detectReadableArticle(document, paragraphs);
+    const hasPlayableContent = articleDetection.isReadableArticle || articleDetection.canPlayBestEffort;
+    console.log(
+      `[Pocket Speechify] Article detection triggered: autoShow=${articleDetection.isReadableArticle}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence}`,
+    );
 
     /** @type {{ text: string, paragraphIndex: number, sentenceIndex: number }[]} */
     const ttsHistory = [];
@@ -134,6 +140,7 @@ export default defineContentScript({
 
     const actions = {
       play(fromParagraph = 0) {
+        if (!hasPlayableContent) { log.warn('play: page is not playable'); return; }
         if (paragraphs.length === 0) { log.warn('play: no paragraphs'); return; }
         log.debug(`play(fromParagraph=${fromParagraph}), speed=${state.get().speed}`);
         state.dispatch({ playback: 'playing' });
@@ -250,7 +257,10 @@ export default defineContentScript({
       },
     };
 
-    await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory);
+    await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory, {
+      initiallyVisible: articleDetection.isReadableArticle,
+      hasPlayableContent,
+    });
 
     // Toolbar button: toggle pill visibility
     chrome.runtime.onMessage.addListener((msg) => {
@@ -265,9 +275,11 @@ export default defineContentScript({
 
     initSidePanels(shadow, state, actions);
 
-    initHighlights(state, paragraphs);
+    if (hasPlayableContent) {
+      initHighlights(state, paragraphs);
+    }
 
-    if (paragraphs.length > 0) {
+    if (articleDetection.isReadableArticle) {
       initHoverPlayer(shadow, state, paragraphs, actions);
 
       initScrollNav(state, paragraphs);
