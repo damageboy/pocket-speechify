@@ -20,7 +20,7 @@ const TEXT_NODE = 3;
 export function detectReadableArticle(doc, paragraphs, options = {}) {
 	const documentRef = doc || document;
 	const isVisible = options.isVisible || defaultIsVisible;
-	const metadataFound = hasArticleMetadata(documentRef);
+	const metadataFound = hasArticleMetadata(documentRef, isVisible);
 	const candidates = collectCandidateRoots(documentRef, isVisible);
 
 	if (candidates.length === 0) {
@@ -237,11 +237,11 @@ function hasSkippedOrHiddenSelf(element) {
 	);
 }
 
-function hasArticleMetadata(doc) {
+function hasArticleMetadata(doc, isVisible) {
 	return (
 		hasOpenGraphArticleType(doc) ||
 		hasJsonLdArticleType(doc) ||
-		hasItemtypeArticleType(doc)
+		hasItemtypeArticleType(doc, isVisible)
 	);
 }
 
@@ -286,10 +286,12 @@ function jsonLdTypeMatches(value) {
 	return false;
 }
 
-function hasItemtypeArticleType(doc) {
-	return Array.from(doc.querySelectorAll("[itemtype]")).some((element) =>
-		isArticleType(element.getAttribute("itemtype")),
-	);
+function hasItemtypeArticleType(doc, isVisible) {
+	return Array.from(doc.querySelectorAll("[itemtype]")).some((element) => {
+		if (!isVisible(element)) return false;
+		if (hasSkippedOrHiddenAncestor(element, null)) return false;
+		return isArticleType(element.getAttribute("itemtype"));
+	});
 }
 
 function isArticleType(value) {

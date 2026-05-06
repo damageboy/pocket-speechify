@@ -147,6 +147,24 @@ describe("detectReadableArticle", () => {
 		expect(result.confidence).toBeLessThan(0.65);
 	});
 
+	it("ignores hidden itemtype article metadata for auto-show confidence", () => {
+		setPageHtml({
+			body: `
+        <p>${proseParagraph(110, "Alpha")}</p>
+        <p>${proseParagraph(110, "Beta")}</p>
+        <p>${proseParagraph(110, "Gamma")}</p>
+        <div aria-hidden="true" itemtype="https://schema.org/Article"></div>
+      `,
+		});
+
+		const result = detectPage();
+
+		expect(result.isReadableArticle).toBe(false);
+		expect(result.canPlayBestEffort).toBe(true);
+		expect(result.confidence).toBeLessThan(0.65);
+		expect(result.reason).toContain("metadata=no");
+	});
+
 	it("recognizes JSON-LD NewsArticle metadata", () => {
 		setPageHtml({
 			head: `
