@@ -37,6 +37,7 @@
 ### Task 1: Detector Tests
 
 **Files:**
+
 - Create: `tests/article-detector.test.js`
 - Reads: `docs/superpowers/specs/2026-05-05-content-aware-pill-visibility-design.md`
 - Reads: `tests/content-extractor.test.js`
@@ -48,12 +49,12 @@ Create `tests/article-detector.test.js` with helpers that build DOM, mark elemen
 Use an injected visibility predicate instead of relying on Happy DOM layout:
 
 ```js
-import { describe, it, expect, beforeEach } from 'vitest';
-import { extractContent } from '../src/content-extractor.js';
-import { detectReadableArticle } from '../src/article-detector.js';
+import { describe, it, expect, beforeEach } from "vitest";
+import { extractContent } from "../src/content-extractor.js";
+import { detectReadableArticle } from "../src/article-detector.js";
 
-function words(count, prefix = 'word') {
-  return Array.from({ length: count }, (_, i) => `${prefix}${i}`).join(' ');
+function words(count, prefix = "word") {
+  return Array.from({ length: count }, (_, i) => `${prefix}${i}`).join(" ");
 }
 
 function paragraph(wordCount, prefix) {
@@ -62,8 +63,8 @@ function paragraph(wordCount, prefix) {
 
 function setBodyHtml(html) {
   document.body.innerHTML = html;
-  document.body.querySelectorAll('*').forEach(el => {
-    Object.defineProperty(el, 'offsetParent', {
+  document.body.querySelectorAll("*").forEach((el) => {
+    Object.defineProperty(el, "offsetParent", {
       get: () => document.body,
       configurable: true,
     });
@@ -78,18 +79,18 @@ function detect() {
 }
 
 beforeEach(() => {
-  document.head.innerHTML = '';
-  document.body.innerHTML = '';
+  document.head.innerHTML = "";
+  document.body.innerHTML = "";
 });
 
-describe('detectReadableArticle', () => {
-  it('auto-shows an article page with metadata and long paragraphs', () => {
+describe("detectReadableArticle", () => {
+  it("auto-shows an article page with metadata and long paragraphs", () => {
     document.head.innerHTML = '<meta property="og:type" content="article">';
     setBodyHtml(`
       <article>
-        <p>${paragraph(120, 'alpha')}</p>
-        <p>${paragraph(120, 'bravo')}</p>
-        <p>${paragraph(120, 'charlie')}</p>
+        <p>${paragraph(120, "alpha")}</p>
+        <p>${paragraph(120, "bravo")}</p>
+        <p>${paragraph(120, "charlie")}</p>
       </article>
     `);
 
@@ -101,10 +102,13 @@ describe('detectReadableArticle', () => {
     expect(result.proseParagraphIndexes).toHaveLength(3);
   });
 
-  it('keeps a link-heavy homepage hidden by default', () => {
-    const cards = Array.from({ length: 20 }, (_, i) => `
+  it("keeps a link-heavy homepage hidden by default", () => {
+    const cards = Array.from(
+      { length: 20 },
+      (_, i) => `
       <li><a href="/story-${i}">Story ${i} ${words(12, `link${i}`)}</a></li>
-    `).join('');
+    `,
+    ).join("");
     setBodyHtml(`<main><ul>${cards}</ul></main>`);
 
     const result = detect();
@@ -113,8 +117,8 @@ describe('detectReadableArticle', () => {
     expect(result.canPlayBestEffort).toBe(false);
   });
 
-  it('disables best-effort playback for a short page', () => {
-    setBodyHtml('<main><p>Short text only.</p></main>');
+  it("disables best-effort playback for a short page", () => {
+    setBodyHtml("<main><p>Short text only.</p></main>");
 
     const result = detect();
 
@@ -122,11 +126,11 @@ describe('detectReadableArticle', () => {
     expect(result.canPlayBestEffort).toBe(false);
   });
 
-  it('auto-shows strong body-only prose without metadata', () => {
+  it("auto-shows strong body-only prose without metadata", () => {
     setBodyHtml(`
-      <p>${paragraph(220, 'alpha')}</p>
-      <p>${paragraph(220, 'bravo')}</p>
-      <p>${paragraph(220, 'charlie')}</p>
+      <p>${paragraph(220, "alpha")}</p>
+      <p>${paragraph(220, "bravo")}</p>
+      <p>${paragraph(220, "charlie")}</p>
     `);
 
     const result = detect();
@@ -135,11 +139,11 @@ describe('detectReadableArticle', () => {
     expect(result.canPlayBestEffort).toBe(true);
   });
 
-  it('allows manual best-effort for enough prose with weak article confidence', () => {
+  it("allows manual best-effort for enough prose with weak article confidence", () => {
     setBodyHtml(`
       <main>
-        <p>${paragraph(70, 'alpha')}</p>
-        <p>${paragraph(70, 'bravo')}</p>
+        <p>${paragraph(70, "alpha")}</p>
+        <p>${paragraph(70, "bravo")}</p>
       </main>
     `);
 
@@ -149,7 +153,7 @@ describe('detectReadableArticle', () => {
     expect(result.canPlayBestEffort).toBe(true);
   });
 
-  it('recognizes JSON-LD Article metadata', () => {
+  it("recognizes JSON-LD Article metadata", () => {
     document.head.innerHTML = `
       <script type="application/ld+json">
         {"@context":"https://schema.org","@type":"NewsArticle"}
@@ -157,9 +161,9 @@ describe('detectReadableArticle', () => {
     `;
     setBodyHtml(`
       <main>
-        <p>${paragraph(120, 'alpha')}</p>
-        <p>${paragraph(120, 'bravo')}</p>
-        <p>${paragraph(120, 'charlie')}</p>
+        <p>${paragraph(120, "alpha")}</p>
+        <p>${paragraph(120, "bravo")}</p>
+        <p>${paragraph(120, "charlie")}</p>
       </main>
     `);
 
@@ -189,6 +193,7 @@ Do not commit failing tests alone unless your workflow requires checkpoint commi
 ### Task 2: Detector Implementation
 
 **Files:**
+
 - Create: `src/article-detector.js`
 - Test: `tests/article-detector.test.js`
 
@@ -199,10 +204,18 @@ Create `src/article-detector.js` implementing the spec thresholds. Keep helper f
 Implementation skeleton:
 
 ```js
-const PROSE_TAGS = new Set(['P', 'BLOCKQUOTE']);
-const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
-const SKIP_TAGS = new Set(['NAV', 'FOOTER', 'HEADER', 'ASIDE', 'SCRIPT', 'STYLE', 'NOSCRIPT']);
-const ARTICLE_TYPES = new Set(['Article', 'NewsArticle', 'BlogPosting']);
+const PROSE_TAGS = new Set(["P", "BLOCKQUOTE"]);
+const HEADING_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
+const SKIP_TAGS = new Set([
+  "NAV",
+  "FOOTER",
+  "HEADER",
+  "ASIDE",
+  "SCRIPT",
+  "STYLE",
+  "NOSCRIPT",
+]);
+const ARTICLE_TYPES = new Set(["Article", "NewsArticle", "BlogPosting"]);
 
 const DEFAULT_OPTIONS = {
   isVisible: (el) => el?.getClientRects?.().length > 0,
@@ -212,19 +225,23 @@ export function detectReadableArticle(doc, paragraphs, options = {}) {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const candidates = buildCandidates(doc, opts);
   const hasArticleMetadata = detectArticleMetadata(doc);
-  const scored = candidates.map(candidate => scoreCandidate(candidate, paragraphs, hasArticleMetadata, opts));
-  const selected = scored.sort((a, b) => {
-    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-    return b.proseWordCount - a.proseWordCount;
-  })[0] || emptyScore(doc.body, hasArticleMetadata);
+  const scored = candidates.map((candidate) =>
+    scoreCandidate(candidate, paragraphs, hasArticleMetadata, opts),
+  );
+  const selected =
+    scored.sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      return b.proseWordCount - a.proseWordCount;
+    })[0] || emptyScore(doc.body, hasArticleMetadata);
 
-  const isReadableArticle = selected.confidence >= 0.65 &&
+  const isReadableArticle =
+    selected.confidence >= 0.65 &&
     selected.proseWordCount >= 300 &&
     selected.longProseBlockCount >= 3 &&
-    selected.linkDensity < 0.50;
+    selected.linkDensity < 0.5;
 
-  const canPlayBestEffort = selected.proseWordCount >= 120 &&
-    selected.proseBlockCount >= 2;
+  const canPlayBestEffort =
+    selected.proseWordCount >= 120 && selected.proseBlockCount >= 2;
 
   return {
     isReadableArticle,
@@ -241,17 +258,19 @@ Add helpers:
 ```js
 function buildCandidates(doc, opts) {
   const roots = [
-    ...doc.querySelectorAll('article'),
-    ...doc.querySelectorAll('main'),
+    ...doc.querySelectorAll("article"),
+    ...doc.querySelectorAll("main"),
     doc.body,
   ].filter(Boolean);
 
-  return Array.from(new Set(roots)).filter(root => isUsableElement(root, opts));
+  return Array.from(new Set(roots)).filter((root) =>
+    isUsableElement(root, opts),
+  );
 }
 
 function isUsableElement(el, opts) {
   if (!el || isInSkippedRegion(el)) return false;
-  if (el.tagName === 'BODY') return true;
+  if (el.tagName === "BODY") return true;
   return opts.isVisible(el);
 }
 
@@ -271,7 +290,8 @@ function scoreCandidate(root, paragraphs, hasArticleMetadata, opts) {
     proseParagraphIndexes.push(index);
     proseWordCount += wordCount;
     proseBlockCount += 1;
-    if (paragraph.text.length >= 80 && wordCount >= 15) longProseBlockCount += 1;
+    if (paragraph.text.length >= 80 && wordCount >= 15)
+      longProseBlockCount += 1;
   });
 
   const linkDensity = calculateLinkDensity(root, opts);
@@ -302,22 +322,29 @@ Use these deterministic rules:
 function isProseLikeBlock(paragraph) {
   const tag = paragraph.element?.tagName;
   const wordCount = paragraph.words?.length || countWords(paragraph.text);
-  if (!paragraph.text || paragraph.text.length < 40 || wordCount < 8) return false;
+  if (!paragraph.text || paragraph.text.length < 40 || wordCount < 8)
+    return false;
   if (PROSE_TAGS.has(tag)) return true;
   if (HEADING_TAGS.has(tag)) return /[.!?]/.test(paragraph.text);
   return false;
 }
 
-function calculateConfidence({ root, hasArticleMetadata, proseWordCount, longProseBlockCount, linkDensity }) {
+function calculateConfidence({
+  root,
+  hasArticleMetadata,
+  proseWordCount,
+  longProseBlockCount,
+  linkDensity,
+}) {
   let confidence = 0;
   if (hasArticleMetadata) confidence += 0.25;
-  if (root.tagName === 'ARTICLE') confidence += 0.20;
-  if (root.tagName === 'MAIN') confidence += 0.10;
-  if (proseWordCount >= 300) confidence += 0.20;
-  if (proseWordCount >= 600) confidence += 0.20;
-  if (longProseBlockCount >= 3) confidence += 0.20;
-  if (linkDensity < 0.35) confidence += 0.10;
-  if (linkDensity >= 0.50) confidence -= 0.25;
+  if (root.tagName === "ARTICLE") confidence += 0.2;
+  if (root.tagName === "MAIN") confidence += 0.1;
+  if (proseWordCount >= 300) confidence += 0.2;
+  if (proseWordCount >= 600) confidence += 0.2;
+  if (longProseBlockCount >= 3) confidence += 0.2;
+  if (linkDensity < 0.35) confidence += 0.1;
+  if (linkDensity >= 0.5) confidence -= 0.25;
   return Math.max(0, Math.min(1, confidence));
 }
 ```
@@ -362,6 +389,7 @@ git commit -m "feat: add readable article detector"
 ### Task 3: Pill Player Visibility and Playability Options
 
 **Files:**
+
 - Modify: `src/pill-player.js`
 - Create: `tests/pill-player.test.js`
 
@@ -370,24 +398,41 @@ git commit -m "feat: add readable article detector"
 Create `tests/pill-player.test.js` with direct `initPillPlayer()` coverage.
 
 ```js
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createState } from '../src/state.js';
-import { initPillPlayer } from '../src/pill-player.js';
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { createState } from "../src/state.js";
+import { initPillPlayer } from "../src/pill-player.js";
 
-function makeParagraph(text = 'Enough words for a playable test paragraph.') {
-  const element = document.createElement('p');
+function makeParagraph(text = "Enough words for a playable test paragraph.") {
+  const element = document.createElement("p");
   element.textContent = text;
   return {
     element,
     text,
-    sentences: [{ text, words: text.split(/\s+/).map((word, i) => ({ text: word, startOffset: i, endOffset: i + word.length })) }],
-    words: text.split(/\s+/).map((word, i) => ({ text: word, startOffset: i, endOffset: i + word.length })),
+    sentences: [
+      {
+        text,
+        words: text
+          .split(/\s+/)
+          .map((word, i) => ({
+            text: word,
+            startOffset: i,
+            endOffset: i + word.length,
+          })),
+      },
+    ],
+    words: text
+      .split(/\s+/)
+      .map((word, i) => ({
+        text: word,
+        startOffset: i,
+        endOffset: i + word.length,
+      })),
   };
 }
 
 async function renderPill(options = {}, paragraphs = [makeParagraph()]) {
-  const host = document.createElement('div');
-  const shadow = host.attachShadow({ mode: 'open' });
+  const host = document.createElement("div");
+  const shadow = host.attachShadow({ mode: "open" });
   document.body.appendChild(host);
   const state = createState();
   const actions = {
@@ -404,35 +449,52 @@ async function renderPill(options = {}, paragraphs = [makeParagraph()]) {
 }
 
 beforeEach(() => {
-  document.body.innerHTML = '';
+  document.body.innerHTML = "";
   globalThis.chrome = {
     storage: { local: { get: vi.fn().mockResolvedValue({}), set: vi.fn() } },
-    runtime: { getManifest: vi.fn(() => ({ name: 'Pocket Speechify', version: '0.0.0' })) },
+    runtime: {
+      getManifest: vi.fn(() => ({
+        name: "Pocket Speechify",
+        version: "0.0.0",
+      })),
+    },
   };
 });
 
-describe('initPillPlayer visibility options', () => {
-  it('initializes hidden when initiallyVisible is false', async () => {
-    const { shadow } = await renderPill({ initiallyVisible: false, hasPlayableContent: true });
-    expect(shadow.querySelector('.pill-container').style.display).toBe('none');
+describe("initPillPlayer visibility options", () => {
+  it("initializes hidden when initiallyVisible is false", async () => {
+    const { shadow } = await renderPill({
+      initiallyVisible: false,
+      hasPlayableContent: true,
+    });
+    expect(shadow.querySelector(".pill-container").style.display).toBe("none");
   });
 
-  it('initializes visible by default when initiallyVisible is true', async () => {
-    const { shadow } = await renderPill({ initiallyVisible: true, hasPlayableContent: true });
-    expect(shadow.querySelector('.pill-container').style.display).toBe('');
+  it("initializes visible by default when initiallyVisible is true", async () => {
+    const { shadow } = await renderPill({
+      initiallyVisible: true,
+      hasPlayableContent: true,
+    });
+    expect(shadow.querySelector(".pill-container").style.display).toBe("");
   });
 
-  it('disables play when hasPlayableContent is false even if paragraphs exist', async () => {
-    const { shadow, actions } = await renderPill({ initiallyVisible: true, hasPlayableContent: false });
+  it("disables play when hasPlayableContent is false even if paragraphs exist", async () => {
+    const { shadow, actions } = await renderPill({
+      initiallyVisible: true,
+      hasPlayableContent: false,
+    });
     const play = shadow.querySelector('[aria-label="Play"]');
 
-    expect(play.classList.contains('btn-disabled')).toBe(true);
+    expect(play.classList.contains("btn-disabled")).toBe(true);
     play.click();
     expect(actions.play).not.toHaveBeenCalled();
   });
 
-  it('calls play when hasPlayableContent is true', async () => {
-    const { shadow, actions } = await renderPill({ initiallyVisible: true, hasPlayableContent: true });
+  it("calls play when hasPlayableContent is true", async () => {
+    const { shadow, actions } = await renderPill({
+      initiallyVisible: true,
+      hasPlayableContent: true,
+    });
     shadow.querySelector('[aria-label="Play"]').click();
     expect(actions.play).toHaveBeenCalledTimes(1);
   });
@@ -470,7 +532,7 @@ After creating `pill` and setting its scale, apply initial hidden state:
 
 ```js
 if (!initiallyVisible) {
-  pill.style.display = 'none';
+  pill.style.display = "none";
 }
 ```
 
@@ -508,6 +570,7 @@ git commit -m "feat: add pill visibility options"
 ### Task 4: Content Script Integration
 
 **Files:**
+
 - Modify: `entrypoints/content.js`
 - Test: existing detector and pill tests
 
@@ -516,7 +579,7 @@ git commit -m "feat: add pill visibility options"
 In `entrypoints/content.js`, add:
 
 ```js
-import { detectReadableArticle } from '../src/article-detector.js';
+import { detectReadableArticle } from "../src/article-detector.js";
 ```
 
 - [ ] **Step 2: Compute detection after extraction**
@@ -532,9 +595,12 @@ add:
 
 ```js
 const articleDetection = detectReadableArticle(document, paragraphs);
-const hasPlayableContent = articleDetection.isReadableArticle || articleDetection.canPlayBestEffort;
+const hasPlayableContent =
+  articleDetection.isReadableArticle || articleDetection.canPlayBestEffort;
 log.info(`Article detection: ${articleDetection.reason}`);
-console.log(`[Pocket Speechify] Article detection triggered: autoShow=${articleDetection.isReadableArticle}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence.toFixed(2)}`);
+console.log(
+  `[Pocket Speechify] Article detection triggered: autoShow=${articleDetection.isReadableArticle}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence.toFixed(2)}`,
+);
 ```
 
 This `console.log` is not a user interaction, but it is useful startup diagnostics and matches the project debugging style.
@@ -544,17 +610,23 @@ This `console.log` is not a user interaction, but it is useful startup diagnosti
 At the start of `actions.play(fromParagraph = 0)`, change:
 
 ```js
-if (paragraphs.length === 0) { log.warn('play: no paragraphs'); return; }
+if (paragraphs.length === 0) {
+  log.warn("play: no paragraphs");
+  return;
+}
 ```
 
 to:
 
 ```js
 if (!hasPlayableContent) {
-  log.warn('play: page is not playable');
+  log.warn("play: page is not playable");
   return;
 }
-if (paragraphs.length === 0) { log.warn('play: no paragraphs'); return; }
+if (paragraphs.length === 0) {
+  log.warn("play: no paragraphs");
+  return;
+}
 ```
 
 Do not add a user-interaction `console.log` here unless it logs a click handler. The actual play button click is already logged in `src/pill-player.js`.
@@ -635,6 +707,7 @@ git commit -m "feat: gate pill auto-show by article detection"
 ### Task 5: Final Verification and Manual Acceptance
 
 **Files:**
+
 - No code changes expected unless verification finds issues.
 
 - [ ] **Step 1: Run the full test suite**
