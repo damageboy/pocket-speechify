@@ -1,6 +1,6 @@
 import { log } from "../src/logger.js";
 import { createState } from "../src/state.js";
-import { extractContent } from "../src/content-extractor.js";
+import { createContentSource } from "../src/content-extractor.js";
 import { detectReadableArticle } from "../src/article-detector.js";
 import { RemoteTTS } from "../src/remote-tts.js";
 import { initPillPlayer } from "../src/pill-player.js";
@@ -8,6 +8,11 @@ import { initSidePanels } from "../src/side-panels.js";
 import { initHighlights } from "../src/highlight.js";
 import { initHoverPlayer } from "../src/hover-player.js";
 import { initScrollNav } from "../src/scroll-nav.js";
+import {
+	canMoveToParagraph,
+	createPlaybackPlan,
+	toGlobalParagraphIndex,
+} from "../src/playback-plan.js";
 import {
 	resolvePageLanguage,
 	saveLanguageOverride,
@@ -18,6 +23,20 @@ function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
 	return paragraphs[pIdx].sentences
 		.slice(0, sIdx)
 		.reduce((sum, s) => sum + s.words.length, 0);
+}
+
+function getPlayableContentStatus(contentSource, articleDetection) {
+	return Boolean(
+		contentSource.metadata?.hasPlayableContent ||
+			articleDetection.isReadableArticle ||
+			articleDetection.canPlayBestEffort,
+	);
+}
+
+function shouldAutoShow(contentSource, articleDetection) {
+	return Boolean(
+		contentSource.metadata?.autoShow || articleDetection.isReadableArticle,
+	);
 }
 
 export default defineContentScript({
@@ -47,21 +66,28 @@ export default defineContentScript({
 		console.log(
 			`[Pocket Speechify] Language resolved: ${languageResolution.selectedLanguage} (${languageResolution.languageSource})`,
 		);
+		const pageUrl = new URL(location.href);
+		const contentSource = createContentSource(pageUrl, document);
+		const paragraphs = contentSource.getParagraphs();
+		log.info(
+			`Extracted ${paragraphs.length} paragraphs via ${contentSource.site}`,
+		);
+		const articleDetection = detectReadableArticle(document, paragraphs);
+		const hasPlayableContent = getPlayableContentStatus(
+			contentSource,
+			articleDetection,
+		);
+		console.log(
+			`[Pocket Speechify] Article detection triggered: site=${contentSource.site}, autoShow=${shouldAutoShow(contentSource, articleDetection)}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence}`,
+		);
+
 		const state = createState({
 			selectedLanguage: languageResolution.selectedLanguage,
 			detectedLanguage: languageResolution.detectedLanguage,
 			languageSource: languageResolution.languageSource,
 			siteKey: languageResolution.siteKey,
+			hasPlayableContent,
 		});
-
-		const paragraphs = extractContent();
-		log.info(`Extracted ${paragraphs.length} paragraphs`);
-		const articleDetection = detectReadableArticle(document, paragraphs);
-		const hasPlayableContent =
-			articleDetection.isReadableArticle || articleDetection.canPlayBestEffort;
-		console.log(
-			`[Pocket Speechify] Article detection triggered: autoShow=${articleDetection.isReadableArticle}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence}`,
-		);
 
 		/** @type {{ text: string, paragraphIndex: number, sentenceIndex: number }[]} */
 		const ttsHistory = [];
@@ -71,11 +97,23 @@ export default defineContentScript({
 		const tts = new RemoteTTS();
 		tts.setLanguage(state.get().selectedLanguage);
 		tts.setVoice(state.get().voiceId);
+		let activePlaybackPlan = createPlaybackPlan({
+			paragraphs,
+			playbackMode: contentSource.metadata?.playbackMode,
+		});
+
+		function currentPlaybackMode() {
+			return contentSource.metadata?.playbackMode || "continuous";
+		}
+
+		function realParagraphIndex(ttsParagraphIndex) {
+			return toGlobalParagraphIndex(activePlaybackPlan, ttsParagraphIndex);
+		}
 
 		// Wire TTS events to state updates
 		tts.addEventListener("word", (e) => {
 			state.dispatch({
-				currentParagraphIndex: e.detail.paragraphIndex,
+				currentParagraphIndex: realParagraphIndex(e.detail.paragraphIndex),
 				currentWordIndex: e.detail.wordIndex,
 			});
 		});
@@ -132,13 +170,14 @@ export default defineContentScript({
 
 		tts.addEventListener("sentence", (e) => {
 			const { paragraphIndex, sentenceIndex, text } = e.detail;
+			const globalParagraphIndex = realParagraphIndex(paragraphIndex);
 			state.dispatch({ currentSentenceIndex: sentenceIndex });
 			ttsHistory.push({
 				text:
 					text ||
-					paragraphs[paragraphIndex]?.sentences[sentenceIndex]?.text ||
+					paragraphs[globalParagraphIndex]?.sentences[sentenceIndex]?.text ||
 					"",
-				paragraphIndex,
+				paragraphIndex: globalParagraphIndex,
 				sentenceIndex,
 			});
 		});
@@ -153,9 +192,37 @@ export default defineContentScript({
 			}
 		});
 
+		function recordPlaybackHistory(paragraphIndex, sentenceIndex) {
+			ttsHistory.push({
+				text: paragraphs[paragraphIndex]?.sentences[sentenceIndex]?.text || "",
+				paragraphIndex,
+				sentenceIndex,
+			});
+		}
+
+		function startPlayback(fromParagraph, fromWord = 0, sentenceIndex = 0) {
+			activePlaybackPlan = createPlaybackPlan({
+				paragraphs,
+				fromParagraph,
+				playbackMode: currentPlaybackMode(),
+			});
+			console.log(
+				`[Pocket Speechify] Playback plan triggered: mode=${activePlaybackPlan.playbackMode}, fromParagraph=${fromParagraph}, ttsParagraphs=${activePlaybackPlan.ttsParagraphs.length}`,
+			);
+			state.dispatch({ playback: "playing" });
+			tts.play(
+				activePlaybackPlan.ttsParagraphs,
+				activePlaybackPlan.ttsStartParagraph,
+				fromWord,
+				state.get().speed,
+				state.get().selectedLanguage,
+			);
+			recordPlaybackHistory(fromParagraph, sentenceIndex);
+		}
+
 		const actions = {
 			play(fromParagraph = 0) {
-				if (!hasPlayableContent) {
+				if (!state.get().hasPlayableContent) {
 					log.warn("play: page is not playable");
 					return;
 				}
@@ -166,19 +233,7 @@ export default defineContentScript({
 				log.debug(
 					`play(fromParagraph=${fromParagraph}), speed=${state.get().speed}`,
 				);
-				state.dispatch({ playback: "playing" });
-				tts.play(
-					paragraphs,
-					fromParagraph,
-					0,
-					state.get().speed,
-					state.get().selectedLanguage,
-				);
-				ttsHistory.push({
-					text: paragraphs[fromParagraph].sentences[0].text,
-					paragraphIndex: fromParagraph,
-					sentenceIndex: 0,
-				});
+				startPlayback(fromParagraph);
 			},
 			pause() {
 				log.debug("pause");
@@ -216,7 +271,11 @@ export default defineContentScript({
 					newPIdx = pIdx + 1;
 					newSIdx = 0;
 				}
-				if (newPIdx >= paragraphs.length) return;
+				if (
+					newPIdx >= paragraphs.length ||
+					!canMoveToParagraph(activePlaybackPlan, newPIdx)
+				)
+					return;
 				const fromWord = wordOffsetForSentence(paragraphs, newPIdx, newSIdx);
 				tts.stop();
 				state.dispatch({
@@ -224,21 +283,7 @@ export default defineContentScript({
 					currentSentenceIndex: newSIdx,
 					currentWordIndex: fromWord,
 				});
-				if (playback === "playing") {
-					state.dispatch({ playback: "playing" });
-					ttsHistory.push({
-						text: paragraphs[newPIdx].sentences[newSIdx].text,
-						paragraphIndex: newPIdx,
-						sentenceIndex: newSIdx,
-					});
-					tts.play(
-						paragraphs,
-						newPIdx,
-						fromWord,
-						state.get().speed,
-						state.get().selectedLanguage,
-					);
-				}
+				if (playback === "playing") startPlayback(newPIdx, fromWord, newSIdx);
 			},
 			skipBack() {
 				const {
@@ -268,6 +313,7 @@ export default defineContentScript({
 						}
 					}
 				}
+				if (!canMoveToParagraph(activePlaybackPlan, newPIdx)) return;
 				const fromWord = wordOffsetForSentence(paragraphs, newPIdx, newSIdx);
 				tts.stop();
 				state.dispatch({
@@ -275,21 +321,7 @@ export default defineContentScript({
 					currentSentenceIndex: newSIdx,
 					currentWordIndex: fromWord,
 				});
-				if (playback === "playing") {
-					state.dispatch({ playback: "playing" });
-					ttsHistory.push({
-						text: paragraphs[newPIdx].sentences[newSIdx].text,
-						paragraphIndex: newPIdx,
-						sentenceIndex: newSIdx,
-					});
-					tts.play(
-						paragraphs,
-						newPIdx,
-						fromWord,
-						state.get().speed,
-						state.get().selectedLanguage,
-					);
-				}
+				if (playback === "playing") startPlayback(newPIdx, fromWord, newSIdx);
 			},
 			setSpeed(speed) {
 				log.debug(`setSpeed(${speed})`);
@@ -318,7 +350,7 @@ export default defineContentScript({
 		};
 
 		await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory, {
-			initiallyVisible: articleDetection.isReadableArticle,
+			initiallyVisible: shouldAutoShow(contentSource, articleDetection),
 			hasPlayableContent,
 		});
 
@@ -337,14 +369,46 @@ export default defineContentScript({
 
 		initSidePanels(shadow, state, actions);
 
-		if (hasPlayableContent) {
-			initHighlights(state, paragraphs);
+		let highlightsInitialized = false;
+		let hoverController = null;
+		let scrollNavInitialized = false;
+
+		function initializePlaybackHelpers(playable, autoShow) {
+			if (playable && !highlightsInitialized) {
+				initHighlights(state, paragraphs);
+				highlightsInitialized = true;
+			}
+			if (autoShow && !hoverController) {
+				hoverController = initHoverPlayer(shadow, state, paragraphs, actions);
+			}
+			if (autoShow && !scrollNavInitialized) {
+				initScrollNav(state, paragraphs);
+				scrollNavInitialized = true;
+			}
 		}
 
-		if (articleDetection.isReadableArticle) {
-			initHoverPlayer(shadow, state, paragraphs, actions);
+		initializePlaybackHelpers(
+			hasPlayableContent,
+			shouldAutoShow(contentSource, articleDetection),
+		);
 
-			initScrollNav(state, paragraphs);
-		}
+		contentSource.subscribe(() => {
+			const nextArticleDetection = detectReadableArticle(document, paragraphs);
+			const nextHasPlayableContent = getPlayableContentStatus(
+				contentSource,
+				nextArticleDetection,
+			);
+			const nextAutoShow = shouldAutoShow(contentSource, nextArticleDetection);
+			console.log(
+				`[Pocket Speechify] Content source updated: site=${contentSource.site}, paragraphs=${paragraphs.length}, playable=${nextHasPlayableContent}`,
+			);
+			state.dispatch({ hasPlayableContent: nextHasPlayableContent });
+			initializePlaybackHelpers(nextHasPlayableContent, nextAutoShow);
+			if (hoverController) hoverController.bindParagraphs();
+			if (nextAutoShow && nextHasPlayableContent) {
+				const container = shadow.querySelector(".pill-container");
+				if (container) container.style.display = "";
+			}
+		});
 	},
 });

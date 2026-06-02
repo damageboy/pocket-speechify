@@ -104,4 +104,25 @@ describe("initPillPlayer", () => {
 
 		expect(actions.play).toHaveBeenCalledTimes(1);
 	});
+
+	it("enables the idle play button when playable content appears dynamically", async () => {
+		const { shadow, state, actions } = await renderPill({
+			paragraphs: [],
+			options: { hasPlayableContent: false },
+		});
+
+		const disabledPlayButton = shadow.querySelector(
+			'button[aria-label="Play"]',
+		);
+		expect(disabledPlayButton.classList.contains("btn-disabled")).toBe(true);
+
+		state.dispatch({ hasPlayableContent: true });
+
+		const enabledPlayButton = shadow.querySelector('button[aria-label="Play"]');
+		expect(enabledPlayButton.classList.contains("btn-disabled")).toBe(false);
+
+		enabledPlayButton.click();
+
+		expect(actions.play).toHaveBeenCalledTimes(1);
+	});
 });

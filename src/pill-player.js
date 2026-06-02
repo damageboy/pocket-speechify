@@ -156,7 +156,7 @@ export async function initPillPlayer(
 	ttsHistory = [],
 	options = {},
 ) {
-	const hasContent = options.hasPlayableContent ?? paragraphs.length > 0;
+	let hasContent = options.hasPlayableContent ?? paragraphs.length > 0;
 	const initiallyVisible = options.initiallyVisible ?? true;
 
 	// --- Persisted settings ---
@@ -676,6 +676,15 @@ export async function initPillPlayer(
 			const dur = formatDuration(current.totalDurationSec, current.elapsedSec);
 			minsSpan.textContent = dur.mins;
 			secsSpan.textContent = dur.secs;
+		}
+
+		// Update idle play availability when dynamic content sources find content.
+		if (current.hasPlayableContent !== prev.hasPlayableContent) {
+			hasContent = current.hasPlayableContent;
+			if (current.playback === "idle" && !current.downloadProgress) {
+				toggleSlot.replaceChildren(renderIdlePlayButton(hasContent, actions));
+				skipButtons.style.display = "none";
+			}
 		}
 
 		// Update voice avatar and language badge when voice or language changes
