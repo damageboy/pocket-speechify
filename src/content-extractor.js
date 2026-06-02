@@ -84,8 +84,18 @@ function extractGenericContent(doc) {
 	while ((node = walker.nextNode())) {
 		const paragraph = buildParagraph(node, node.textContent, "generic");
 		if (!paragraph) continue;
+		if (isNestedDuplicateParagraph(paragraphs[paragraphs.length - 1], paragraph))
+			continue;
 		paragraphs.push(paragraph);
 	}
 
 	return paragraphs;
+}
+
+function isNestedDuplicateParagraph(previous, paragraph) {
+	if (!previous || previous.text !== paragraph.text) return false;
+	return (
+		previous.element.contains(paragraph.element) ||
+		paragraph.element.contains(previous.element)
+	);
 }

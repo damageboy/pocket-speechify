@@ -93,6 +93,20 @@ describe("extractContent", () => {
 		expect(paragraphs.length).toBe(3);
 	});
 
+	it("does not duplicate list items that wrap their text in paragraph tags", () => {
+		setBodyHtml(
+			"<p>There are two camps:</p><ol><li><p>Team price/book</p></li><li><p>Team price/earnings</p></li></ol>",
+		);
+
+		const paragraphs = extractContent();
+
+		expect(paragraphs.map((paragraph) => paragraph.text)).toEqual([
+			"There are two camps:",
+			"Team price/book",
+			"Team price/earnings",
+		]);
+	});
+
 	it("splits text into sentences", () => {
 		setBodyHtml("<p>First sentence. Second sentence! Third sentence?</p>");
 		const paragraphs = extractContent();
