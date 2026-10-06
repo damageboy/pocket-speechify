@@ -11,6 +11,7 @@ import { initScrollNav } from "../src/scroll-nav.js";
 import {
 	canMoveToParagraph,
 	createPlaybackPlan,
+	findParagraphIndex,
 	toGlobalParagraphIndex,
 } from "../src/playback-plan.js";
 import {
@@ -18,6 +19,10 @@ import {
 	saveLanguageOverride,
 } from "../src/language-detection.js";
 import { getDefaultVoiceForLanguage } from "../src/languages.js";
+import {
+	computeProgress,
+	createRateMeter,
+} from "../src/playback-progress.js";
 
 function wordOffsetForSentence(paragraphs, pIdx, sIdx) {
 	return paragraphs[pIdx].sentences
@@ -42,7 +47,7 @@ function shouldAutoShow(contentSource, articleDetection) {
 export default defineContentScript({
 	matches: ["<all_urls>"],
 	runAt: "document_idle",
-	async main() {
+	async main(ctx) {
 		if (document.getElementById("pocket-speechify-host")) return;
 
 		const host = document.createElement("div");
@@ -92,8 +97,6 @@ export default defineContentScript({
 		/** @type {{ text: string, paragraphIndex: number, sentenceIndex: number }[]} */
 		const ttsHistory = [];
 
-		// totalDurationSec will be estimated by RemoteTTS on play()
-
 		const tts = new RemoteTTS();
 		tts.setLanguage(state.get().selectedLanguage);
 		tts.setVoice(state.get().voiceId);
@@ -101,6 +104,7 @@ export default defineContentScript({
 			paragraphs,
 			playbackMode: contentSource.metadata?.playbackMode,
 		});
+		let currentTTSParagraphIndex = activePlaybackPlan.ttsStartParagraph;
 
 		function currentPlaybackMode() {
 			return contentSource.metadata?.playbackMode || "continuous";
@@ -110,34 +114,78 @@ export default defineContentScript({
 			return toGlobalParagraphIndex(activePlaybackPlan, ttsParagraphIndex);
 		}
 
-		// Wire TTS events to state updates
-		tts.addEventListener("word", (e) => {
-			state.dispatch({
-				currentParagraphIndex: realParagraphIndex(e.detail.paragraphIndex),
-				currentWordIndex: e.detail.wordIndex,
-			});
-		});
+		// Position to restart from when the user seeks while paused: the paused
+		// pipeline is cancelled, so resume() must start a new playback.
+		let resumeFrom = null;
+		// Last spoken word; currentWordIndex is null in silences between words.
+		let lastWord = null;
 
-		tts.addEventListener("elapsed", (e) => {
-			state.dispatch({ elapsedSec: e.detail.elapsedSec });
-		});
-
-		tts.addEventListener("duration-estimate", (e) => {
-			state.dispatch({
-				totalDurationSec: e.detail.totalDurationSec,
-				elapsedOffsetSec: e.detail.elapsedOffsetSec || 0,
-			});
-		});
-
-		tts.addEventListener("end", () => {
-			log.debug("TTS end — playback complete");
+		function resetPlaybackState() {
+			resumeFrom = null;
+			lastWord = null;
 			state.dispatch({
 				playback: "idle",
 				currentParagraphIndex: null,
 				currentSentenceIndex: null,
 				currentWordIndex: null,
-				elapsedSec: 0,
+				downloadProgress: null,
 			});
+		}
+
+		// Seconds per word at 1x, measured from generated audio per voice.
+		const rateMeter = createRateMeter();
+
+		function updateProgress() {
+			const { playback, speed } = state.get();
+			const progressParagraphs = playback === "idle"
+				? (currentPlaybackMode() === "single" ? [] : paragraphs)
+				: activePlaybackPlan.ttsParagraphs;
+			state.dispatch({
+				progress: computeProgress({
+					paragraphs: progressParagraphs,
+					scope: progressParagraphs.map((_, index) => index),
+					position: playback === "idle" ? null : lastWord,
+					secPerWord: rateMeter.secPerWord(),
+					speed,
+				}),
+			});
+		}
+
+		// Wire TTS events to state updates
+		tts.addEventListener("word", (e) => {
+			currentTTSParagraphIndex = e.detail.paragraphIndex;
+			const paragraphIndex = realParagraphIndex(currentTTSParagraphIndex);
+			if (paragraphIndex === null) {
+				actions.stop();
+				return;
+			}
+			const { wordIndex } = e.detail;
+			if (wordIndex !== null || lastWord?.paragraphIndex !== currentTTSParagraphIndex) {
+				lastWord = { paragraphIndex: currentTTSParagraphIndex, wordIndex: wordIndex ?? 0 };
+			}
+			state.dispatch({
+				currentParagraphIndex: paragraphIndex,
+				currentWordIndex: wordIndex,
+			});
+		});
+
+		tts.addEventListener("measured", (e) => {
+			rateMeter.add(e.detail.sourceSec, e.detail.words);
+			console.log(
+				`[Pocket Speechify] Speech rate measured: ${rateMeter.secPerWord().toFixed(3)}s/word`,
+			);
+			updateProgress();
+		});
+
+		tts.addEventListener("end", () => {
+			log.debug("TTS end — playback complete");
+			resetPlaybackState();
+		});
+
+		tts.addEventListener("error", (e) => {
+			console.error(`[Pocket Speechify] Playback failed: ${e.detail.error}`);
+			tts.stop();
+			resetPlaybackState();
 		});
 
 		tts.addEventListener("download-progress", (e) => {
@@ -172,6 +220,7 @@ export default defineContentScript({
 			const { paragraphIndex, sentenceIndex, text } = e.detail;
 			const globalParagraphIndex = realParagraphIndex(paragraphIndex);
 			state.dispatch({ currentSentenceIndex: sentenceIndex });
+			if (globalParagraphIndex === null) return;
 			ttsHistory.push({
 				text:
 					text ||
@@ -184,32 +233,48 @@ export default defineContentScript({
 
 		// Wire language and voiceId state changes to RemoteTTS
 		state.subscribe((current, prev) => {
+			const voiceChanged =
+				current.voiceId !== prev.voiceId ||
+				current.selectedLanguage !== prev.selectedLanguage;
 			if (current.voiceId !== prev.voiceId) {
 				tts.setVoice(current.voiceId);
 			}
 			if (current.selectedLanguage !== prev.selectedLanguage) {
 				tts.setLanguage(current.selectedLanguage);
 			}
+			// Speech rate differs per voice and language.
+			if (voiceChanged) rateMeter.reset();
+			if (
+				voiceChanged ||
+				current.playback !== prev.playback ||
+				current.speed !== prev.speed ||
+				current.currentParagraphIndex !== prev.currentParagraphIndex ||
+				current.currentWordIndex !== prev.currentWordIndex
+			) {
+				updateProgress();
+			}
 		});
 
-		function recordPlaybackHistory(paragraphIndex, sentenceIndex) {
-			ttsHistory.push({
-				text: paragraphs[paragraphIndex]?.sentences[sentenceIndex]?.text || "",
-				paragraphIndex,
-				sentenceIndex,
-			});
-		}
-
-		function startPlayback(fromParagraph, fromWord = 0, sentenceIndex = 0) {
+		function startPlayback(fromParagraph, fromWord = 0) {
+			resumeFrom = null;
 			activePlaybackPlan = createPlaybackPlan({
 				paragraphs,
 				fromParagraph,
 				playbackMode: currentPlaybackMode(),
 			});
+			currentTTSParagraphIndex = activePlaybackPlan.ttsStartParagraph;
+			lastWord = { paragraphIndex: currentTTSParagraphIndex, wordIndex: fromWord };
 			console.log(
 				`[Pocket Speechify] Playback plan triggered: mode=${activePlaybackPlan.playbackMode}, fromParagraph=${fromParagraph}, ttsParagraphs=${activePlaybackPlan.ttsParagraphs.length}`,
 			);
-			state.dispatch({ playback: "playing" });
+			state.dispatch({
+				playback: "playing",
+				currentParagraphIndex: fromParagraph,
+				currentSentenceIndex: paragraphs[fromParagraph].sentences.findIndex(sentence =>
+					sentence.words.includes(paragraphs[fromParagraph].words[fromWord])),
+				currentWordIndex: null,
+			});
+			updateProgress();
 			tts.play(
 				activePlaybackPlan.ttsParagraphs,
 				activePlaybackPlan.ttsStartParagraph,
@@ -217,11 +282,40 @@ export default defineContentScript({
 				state.get().speed,
 				state.get().selectedLanguage,
 			);
-			recordPlaybackHistory(fromParagraph, sentenceIndex);
+		}
+
+		// Move to a sentence. Keeps playing if playing; otherwise remembers the
+		// position so resume() restarts from it.
+		function seekTo(paragraphIndex, sentenceIndex) {
+			const fromWord = wordOffsetForSentence(
+				paragraphs,
+				paragraphIndex,
+				sentenceIndex,
+			);
+			const { playback } = state.get();
+			tts.stop();
+			state.dispatch({
+				currentParagraphIndex: paragraphIndex,
+				currentSentenceIndex: sentenceIndex,
+				currentWordIndex: fromWord,
+			});
+			if (playback === "playing") {
+				startPlayback(paragraphIndex, fromWord);
+			} else {
+				activePlaybackPlan = createPlaybackPlan({ paragraphs, fromParagraph: paragraphIndex, playbackMode: currentPlaybackMode() });
+				currentTTSParagraphIndex = activePlaybackPlan.ttsStartParagraph;
+				resumeFrom = { paragraphIndex, fromWord };
+				lastWord = { paragraphIndex: currentTTSParagraphIndex, wordIndex: fromWord };
+				updateProgress();
+			}
 		}
 
 		const actions = {
-			play(fromParagraph = 0) {
+			play(fromParagraph) {
+				const target = fromParagraph === undefined ? null : paragraphs[fromParagraph];
+				contentSource.refresh();
+				fromParagraph = target ? findParagraphIndex(paragraphs, target) : 0;
+				if (fromParagraph < 0) return;
 				if (!state.get().hasPlayableContent) {
 					log.warn("play: page is not playable");
 					return;
@@ -242,31 +336,26 @@ export default defineContentScript({
 			},
 			resume() {
 				log.debug("resume");
+				if (resumeFrom) {
+					startPlayback(resumeFrom.paragraphIndex, resumeFrom.fromWord);
+					return;
+				}
 				tts.resume();
 				state.dispatch({ playback: "playing" });
 			},
 			stop() {
 				log.debug("stop");
 				tts.stop();
-				state.dispatch({
-					playback: "idle",
-					currentParagraphIndex: null,
-					currentSentenceIndex: null,
-					currentWordIndex: null,
-					elapsedSec: 0,
-				});
+				resetPlaybackState();
 			},
 			skipForward() {
-				const {
-					currentParagraphIndex: pIdx,
-					currentSentenceIndex: sIdx,
-					playback,
-				} = state.get();
-				if (pIdx === null) return;
+				const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx } =
+					state.get();
+				const para = pIdx === null ? null : paragraphs[pIdx];
+				if (!para) return;
 				log.debug(`skipForward from p${pIdx}:s${sIdx}`);
-				const para = paragraphs[pIdx];
 				let newPIdx = pIdx,
-					newSIdx = sIdx + 1;
+					newSIdx = (sIdx ?? 0) + 1;
 				if (newSIdx >= para.sentences.length) {
 					newPIdx = pIdx + 1;
 					newSIdx = 0;
@@ -276,31 +365,30 @@ export default defineContentScript({
 					!canMoveToParagraph(activePlaybackPlan, newPIdx)
 				)
 					return;
-				const fromWord = wordOffsetForSentence(paragraphs, newPIdx, newSIdx);
-				tts.stop();
-				state.dispatch({
-					currentParagraphIndex: newPIdx,
-					currentSentenceIndex: newSIdx,
-					currentWordIndex: fromWord,
-				});
-				if (playback === "playing") startPlayback(newPIdx, fromWord, newSIdx);
+				seekTo(newPIdx, newSIdx);
 			},
 			skipBack() {
 				const {
 					currentParagraphIndex: pIdx,
 					currentSentenceIndex: sIdx,
-					currentWordIndex: wIdx,
-					playback,
+					currentWordIndex,
 				} = state.get();
-				if (pIdx === null) return;
-				log.debug(`skipBack from p${pIdx}:s${sIdx}:w${wIdx}`);
-				let newPIdx = pIdx,
-					newSIdx = sIdx;
+				if (pIdx === null || !paragraphs[pIdx] || sIdx === null) return;
 				const sentenceStartWordIdx = wordOffsetForSentence(
 					paragraphs,
 					pIdx,
 					sIdx,
 				);
+				const wIdx =
+					currentWordIndex ??
+					(lastWord && realParagraphIndex(lastWord.paragraphIndex) === pIdx
+						? lastWord.wordIndex
+						: sentenceStartWordIdx);
+				log.debug(`skipBack from p${pIdx}:s${sIdx}:w${wIdx}`);
+				let newPIdx = pIdx,
+					newSIdx = sIdx;
+				// Near the start of a sentence, go to the previous one; otherwise
+				// restart the current sentence.
 				if (wIdx - sentenceStartWordIdx < 2) {
 					newSIdx = sIdx - 1;
 					if (newSIdx < 0) {
@@ -314,14 +402,7 @@ export default defineContentScript({
 					}
 				}
 				if (!canMoveToParagraph(activePlaybackPlan, newPIdx)) return;
-				const fromWord = wordOffsetForSentence(paragraphs, newPIdx, newSIdx);
-				tts.stop();
-				state.dispatch({
-					currentParagraphIndex: newPIdx,
-					currentSentenceIndex: newSIdx,
-					currentWordIndex: fromWord,
-				});
-				if (playback === "playing") startPlayback(newPIdx, fromWord, newSIdx);
+				seekTo(newPIdx, newSIdx);
 			},
 			setSpeed(speed) {
 				log.debug(`setSpeed(${speed})`);
@@ -333,21 +414,17 @@ export default defineContentScript({
 				const voiceId = getDefaultVoiceForLanguage(languageId);
 				await saveLanguageOverride(state.get().siteKey, languageId);
 				tts.stop();
-				tts.setLanguage(languageId);
-				tts.setVoice(voiceId);
+				resetPlaybackState();
 				state.dispatch({
 					selectedLanguage: languageId,
 					languageSource: "override",
 					voiceId,
-					playback: "idle",
-					currentParagraphIndex: null,
-					currentSentenceIndex: null,
-					currentWordIndex: null,
-					elapsedSec: 0,
 					panelOpen: "voice",
 				});
 			},
 		};
+
+		updateProgress();
 
 		await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory, {
 			initiallyVisible: shouldAutoShow(contentSource, articleDetection),
@@ -362,6 +439,7 @@ export default defineContentScript({
 			if (!container) return;
 			const isHidden = container.style.display === "none";
 			container.style.display = isHidden ? "" : "none";
+			state.dispatch({ pillUserHidden: !isHidden });
 			console.log(
 				`[Pocket Speechify] pill toggled, display: ${container.style.display || "visible"}`,
 			);
@@ -369,14 +447,13 @@ export default defineContentScript({
 
 		initSidePanels(shadow, state, actions);
 
-		let highlightsInitialized = false;
+		let highlights = null;
 		let hoverController = null;
 		let scrollNavInitialized = false;
 
 		function initializePlaybackHelpers(playable, autoShow) {
-			if (playable && !highlightsInitialized) {
-				initHighlights(state, paragraphs);
-				highlightsInitialized = true;
+			if (playable && !highlights) {
+				highlights = initHighlights(state, paragraphs);
 			}
 			if (autoShow && !hoverController) {
 				hoverController = initHoverPlayer(shadow, state, paragraphs, actions);
@@ -403,12 +480,39 @@ export default defineContentScript({
 				`[Pocket Speechify] Content source updated: site=${contentSource.site}, paragraphs=${paragraphs.length}, playable=${nextHasPlayableContent}`,
 			);
 			state.dispatch({ hasPlayableContent: nextHasPlayableContent });
+			if (state.get().playback !== "idle") {
+				const remaining = activePlaybackPlan.ttsParagraphs
+					.map((_, index) => realParagraphIndex(index))
+					.slice(currentTTSParagraphIndex);
+				// Keep the snapshot through insertions, but never speak edited,
+				// removed or reordered queued text against the new DOM.
+				if (remaining.some((index, i) => index === null || (i > 0 && index <= remaining[i - 1]))) {
+					actions.stop();
+				} else {
+					if (resumeFrom) resumeFrom.paragraphIndex = remaining[0];
+					state.dispatch({ currentParagraphIndex: remaining[0] });
+				}
+			}
 			initializePlaybackHelpers(nextHasPlayableContent, nextAutoShow);
+			highlights?.refresh();
+			updateProgress();
 			if (hoverController) hoverController.bindParagraphs();
-			if (nextAutoShow && nextHasPlayableContent) {
+			if (
+				nextAutoShow &&
+				nextHasPlayableContent &&
+				!state.get().pillUserHidden
+			) {
 				const container = shadow.querySelector(".pill-container");
 				if (container) container.style.display = "";
 			}
+		});
+
+		ctx.onInvalidated(() => {
+			console.log("[Pocket Speechify] Content cleanup triggered");
+			contentSource.destroy();
+			highlights?.destroy();
+			tts.destroy();
+			host.remove();
 		});
 	},
 });

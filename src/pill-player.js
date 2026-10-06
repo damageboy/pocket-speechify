@@ -9,9 +9,6 @@ import {
 	settingsIcon,
 	turnOffIcon,
 	navGeneralIcon,
-	navPlayButtonsIcon,
-	navKeyboardIcon,
-	navAccessibilityIcon,
 	navDebugIcon,
 	navHistoryIcon,
 } from "./icons.js";
@@ -23,11 +20,11 @@ import {
 } from "./voices.js";
 import { languageFlag } from "./languages.js";
 
-function formatDuration(totalSec, elapsedSec) {
-	const remaining = Math.max(0, Math.ceil(totalSec - elapsedSec));
+function formatDuration(remainingSec) {
+	const remaining = Math.max(0, Math.ceil(remainingSec));
 	const mins = Math.floor(remaining / 60);
 	const secs = remaining % 60;
-	return { mins, secs: String(secs).padStart(2, "0") };
+	return { mins: String(mins), secs: String(secs).padStart(2, "0") };
 }
 
 // Build download progress button (circular ring with percentage text inside)
@@ -210,10 +207,7 @@ export async function initPillPlayer(
 
 	// Set initial duration
 	const initState = state.get();
-	const initDur = formatDuration(
-		initState.totalDurationSec,
-		initState.elapsedSec,
-	);
+	const initDur = formatDuration(initState.progress.remainingSec);
 	minsSpan.textContent = initDur.mins;
 	secsSpan.textContent = initDur.secs;
 
@@ -402,9 +396,6 @@ export async function initPillPlayer(
 
 		const sections = [
 			{ key: "General", icon: navGeneralIcon },
-			{ key: "Play Buttons", icon: navPlayButtonsIcon },
-			{ key: "Keyboard Shortcuts", icon: navKeyboardIcon },
-			{ key: "Accessibility", icon: navAccessibilityIcon },
 			{ key: "Debug", icon: navDebugIcon },
 			{ key: "History", icon: navHistoryIcon },
 		];
@@ -646,6 +637,7 @@ export async function initPillPlayer(
 		e.stopPropagation();
 		console.log("[Pocket Speechify] Turn off button clicked");
 		actions.stop();
+		state.dispatch({ pillUserHidden: true });
 		const container = shadow.querySelector(".pill-container");
 		if (container) container.style.display = "none";
 	});
@@ -657,23 +649,18 @@ export async function initPillPlayer(
 	pill.addEventListener("mouseenter", () => {
 		console.log("[Pocket Speechify] Pill hover triggered");
 		pill.classList.add("expanded");
-		state.dispatch({ pillExpanded: true });
 	});
 
 	pill.addEventListener("mouseleave", () => {
 		console.log("[Pocket Speechify] Pill unhover triggered");
 		pill.classList.remove("expanded");
-		state.dispatch({ pillExpanded: false });
 	});
 
 	// --- Subscribe to state changes ---
 	state.subscribe((current, prev) => {
-		// Update duration display
-		if (
-			current.totalDurationSec !== prev.totalDurationSec ||
-			current.elapsedSec !== prev.elapsedSec
-		) {
-			const dur = formatDuration(current.totalDurationSec, current.elapsedSec);
+		// Update duration display (remaining time; the full duration when idle)
+		if (current.progress !== prev.progress) {
+			const dur = formatDuration(current.progress.remainingSec);
 			minsSpan.textContent = dur.mins;
 			secsSpan.textContent = dur.secs;
 		}
@@ -708,12 +695,8 @@ export async function initPillPlayer(
 					toggleSlot.replaceChildren(renderIdlePlayButton(hasContent, actions));
 					skipButtons.style.display = "none";
 				} else {
-					const pct =
-						current.totalDurationSec > 0
-							? (current.elapsedSec / current.totalDurationSec) * 100
-							: 0;
 					toggleSlot.replaceChildren(
-						renderToggleButton(current.playback, pct, actions),
+						renderToggleButton(current.playback, current.progress.percent, actions),
 					);
 					skipButtons.style.display = "";
 				}
@@ -725,12 +708,7 @@ export async function initPillPlayer(
 			speedText.textContent = `${current.speed}x`;
 		}
 
-		const effectiveElapsed =
-			(current.elapsedOffsetSec || 0) + current.elapsedSec;
-		const percent =
-			current.totalDurationSec > 0
-				? Math.min(100, (effectiveElapsed / current.totalDurationSec) * 100)
-				: 0;
+		const { percent } = current.progress;
 
 		if (current.playback !== prev.playback) {
 			// Playback state changed — rebuild only the toggle slot
@@ -745,9 +723,7 @@ export async function initPillPlayer(
 			}
 		} else if (
 			(current.playback === "playing" || current.playback === "paused") &&
-			(current.elapsedSec !== prev.elapsedSec ||
-				current.totalDurationSec !== prev.totalDurationSec ||
-				current.elapsedOffsetSec !== prev.elapsedOffsetSec)
+			current.progress !== prev.progress
 		) {
 			// Progress changed — update only the arc's stroke-dashoffset, no new elements
 			const ring = toggleSlot.querySelector(".progress-ring");

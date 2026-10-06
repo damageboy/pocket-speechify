@@ -51,11 +51,11 @@ describe("detectMetadataLanguage", () => {
 		meta.setAttribute("property", "og:locale");
 		meta.content = "fr_FR";
 		document.head.appendChild(meta);
-		expect(detectMetadataLanguage(document).language).toBe("french_24l");
+		expect(detectMetadataLanguage(document).language).toBe("french");
 	});
 
 	it("returns null for unsupported metadata", () => {
-		document.documentElement.lang = "nl-NL";
+		document.documentElement.lang = "ja-JP";
 		expect(detectMetadataLanguage(document)).toBe(null);
 	});
 
@@ -157,8 +157,8 @@ describe("resolvePageLanguage", () => {
 		await expect(
 			resolvePageLanguage(new URL("https://example.com"), document),
 		).resolves.toMatchObject({
-			selectedLanguage: "french_24l",
-			detectedLanguage: "french_24l",
+			selectedLanguage: "french",
+			detectedLanguage: "french",
 			languageSource: "metadata",
 		});
 	});

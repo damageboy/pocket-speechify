@@ -1,5 +1,5 @@
 // offscreen.js
-import { createWordTimingEstimator } from '../../src/word-timing-estimator.js';
+import { createWordTimeline } from '../../src/word-timeline.js';
 import { createStretchProcessor } from '../../src/stretch-processor.js';
 import {
   DEFAULT_LANGUAGE_ID,
@@ -18,11 +18,6 @@ import { getTTSLoadPlan } from '../../src/tts-load-policy.js';
 // Dynamic import: WASM is embedded in the .mjs, import.meta.url must resolve to public/lib/
 let SignalsmithStretchModule;
 
-// text-processing-rs — must stay dynamic.
-// WASM glue uses import.meta.url to resolve sibling .wasm file.
-// If Vite bundles this statically, import.meta.url points to wrong location → 404.
-let initTextProcessing, tnNormalizeSentence;
-
 const CACHE_NAME = 'pocket-tts-v2';
 const SAMPLE_RATE = 24000;
 
@@ -38,7 +33,7 @@ let currentSpeed = 1.0;
 let paused = false;
 let currentLoadedVoiceId = null;
 let currentLoadedLanguage = null;
-let currentTabId = null;
+let playbackOwner = null; // { tabId, sessionId, genId }; survives service-worker restarts.
 
 // --- Direct WASM stretch processor ---
 // Matches the Rust ssstretch::Stretch pattern: process(input, inputLen, output, outputLen)
@@ -47,93 +42,23 @@ let stretchProcessor = null;
 
 // --- Audio Queue & Scheduler ---
 let audioQueue = [];         // [{ data: Float32Array, workerGenId }]
-let scheduledSources = [];   // [{ source, startTime, endTime, rawDuration }]
+let scheduledSources = [];   // [{ source, endTime }]
 let nextStartTime = 0;
-let cumulativeScheduledSec = 0;
+let paragraphSourceSec = 0; // generated audio at 1x for the current paragraph
 let schedulerTimer = null;
 
-// Per-sentence word timing state
-let currentSentenceMeta = null;
-let wordTimingEstimator = null;
-let sentenceAudioSec = 0;
-let pendingWordTimeouts = [];
-let sentenceStartCtxTime = 0;
-
-// Auto-regulation calibration
-let totalEstimatedSec = 0;
-let totalActualSec = 0;
-let timingCalibrationFactor = 1.0;
+// One native timestamp timeline per paragraph stream.
+let currentParagraphMeta = null;
+let wordTimeline = null;
+let lastWordIndex = null;
+let generationDone = false;
+let stretchFlushed = false;
 
 // Backpressure
 let workerWaiting = false;
 
-// Per-sentence completion promise (resolved when sentence audio finishes playing)
-let sentenceDoneResolve = null;
-
-// Text normalization (text-processing-rs WASM)
-let textProcessingPromise = null;
-function ensureTextProcessing() {
-  if (!textProcessingPromise) {
-    textProcessingPromise = (async () => {
-      const tpModule = await import(browser.runtime.getURL('lib/text-processing-rs/text_processing_rs.js'));
-      initTextProcessing = tpModule.default;
-      tnNormalizeSentence = tpModule.tnNormalizeSentence;
-      await initTextProcessing();
-      logToSW('[Offscreen] text-processing-rs initialized');
-    })();
-  }
-  return textProcessingPromise;
-}
-
-// Abbreviation expansion (loaded once from data/abbreviations.json)
-let abbreviations = null;
-async function loadAbbreviations() {
-  if (abbreviations !== null) return abbreviations;
-  const resp = await fetch(browser.runtime.getURL('data/abbreviations.json'));
-  abbreviations = await resp.json();
-  logToSW(`[Offscreen] Loaded ${Object.keys(abbreviations).length} abbreviation(s)`);
-  return abbreviations;
-}
-
-function expandAbbreviations(text, abbrevMap) {
-  let result = text;
-  for (const [written, spoken] of Object.entries(abbrevMap)) {
-    result = result.replaceAll(written, spoken);
-  }
-  return result;
-}
-
-// Abbreviation-aware sentence splitter used on normalized paragraph text.
-// Avoids false splits on known abbreviations (Dr., Mr., Jan., U.S., etc.).
-const ABBREV_WORDS = new Set([
-  'Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'Sr', 'Jr', 'St', 'Rev', 'Lt', 'Col', 'Gen',
-  'Gov', 'Rep', 'Sen', 'vs', 'Jan', 'Feb', 'Mar', 'Apr', 'Jun', 'Jul', 'Aug',
-  'Sep', 'Oct', 'Nov', 'Dec', 'Corp', 'Inc', 'Ltd', 'Dept', 'e.g', 'i.e',
-  'U.S', 'U.K', 'U.N', 'a.m', 'p.m',
-]);
-
-function splitSentencesOffscreen(text) {
-  const parts = text.split(/([.!?]+(?:\s+|$))/);
-  const sentences = [];
-  let current = '';
-  for (let i = 0; i < parts.length; i++) {
-    current += parts[i];
-    if (i % 2 === 1) {
-      const trimmed = current.trim();
-      if (!trimmed) { current = ''; continue; }
-      // Check if the last word is a known abbreviation — if so, don't split here
-      const words = trimmed.split(/\s+/);
-      const lastWord = words[words.length - 1].replace(/\.$/, '');
-      if (ABBREV_WORDS.has(lastWord) || /^[A-Z]$/.test(lastWord)) {
-        continue; // accumulate into next fragment
-      }
-      sentences.push(trimmed);
-      current = '';
-    }
-  }
-  if (current.trim()) sentences.push(current.trim());
-  return sentences.filter(s => s.length > 0);
-}
+// Resolved only after generation AND all queued/scheduled audio finish.
+let paragraphDoneResolve = null;
 
 function getAudioContext() {
   if (!audioCtx) {
@@ -144,8 +69,13 @@ function getAudioContext() {
 
 // --- Outbound messages ---
 
-function sendToServiceWorker(msg) {
-  browser.runtime.sendMessage({ ...msg, source: 'offscreen' });
+function sendToServiceWorker(msg, owner = playbackOwner) {
+  browser.runtime.sendMessage({ ...owner, ...msg, source: 'offscreen' });
+}
+
+function isOwner(msg) {
+  return playbackOwner && msg.tabId === playbackOwner.tabId &&
+    msg.sessionId === playbackOwner.sessionId && msg.genId === playbackOwner.genId;
 }
 
 function logToSW(message) {
@@ -177,7 +107,7 @@ async function deleteCache(key) {
 
 // --- Resumable download with progress ---
 
-async function downloadWithProgress(url, cacheKey, asset, voiceId, language) {
+async function downloadWithProgress(url, cacheKey, asset, voiceId, language, owner) {
   const partialKey = cacheKey + '.partial';
   const metaKey = cacheKey + '.partial-meta';
 
@@ -203,6 +133,12 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId, language) {
     throw new Error(`Download failed: ${resp.status} ${resp.statusText}`);
   }
 
+  // A server may ignore Range and return the entire file. Never prepend the prefix.
+  if (resp.status === 200) {
+    startByte = 0;
+    existingChunks.length = 0;
+  }
+
   const contentLength = startByte + parseInt(resp.headers.get('content-length') || '0', 10);
   const reader = resp.body.getReader();
   const chunks = [...existingChunks];
@@ -221,7 +157,7 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId, language) {
       const progressBucket = Math.floor(percent / 2);
       if (progressBucket > lastProgressBucket) {
         lastProgressBucket = progressBucket;
-        sendToServiceWorker({ type: 'download-progress', asset, voiceId, language, percent });
+        sendToServiceWorker({ type: 'download-progress', asset, voiceId, language, percent }, owner);
       }
 
       const checkpointBucket = Math.floor(percent / 10);
@@ -246,7 +182,7 @@ async function downloadWithProgress(url, cacheKey, asset, voiceId, language) {
   await deleteCache(partialKey);
   await deleteCache(metaKey);
   logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''}${language ? ` (${language})` : ''} cached (${(received / 1024 / 1024).toFixed(1)}MB)`);
-  sendToServiceWorker({ type: 'download-complete', asset, voiceId, language });
+  sendToServiceWorker({ type: 'download-complete', asset, voiceId, language }, owner);
   return fullBuffer.buffer;
 }
 
@@ -283,7 +219,7 @@ function enqueueChunk(data, workerGenId) {
 
 function startScheduler() {
   if (schedulerTimer) return;
-  schedulerTimer = setInterval(drainQueue, 50);
+  schedulerTimer = setInterval(drainQueue, 25);
 }
 
 function stopScheduler() {
@@ -303,27 +239,34 @@ function drainQueue() {
   while (audioQueue.length > 0 && getBufferedAheadSec() < MAX_BUFFERED_SEC) {
     const entry = audioQueue.shift();
     if (entry.workerGenId !== internalGenCounter) continue;
-    scheduleOneChunk(entry.data);
+    // Keep the stretcher continuous even at 1x so speed changes preserve its
+    // delay line and the source/output timeline remains continuous.
+    scheduleOneChunk(stretchProcessor.process(entry.data, currentSpeed), entry.data.length / SAMPLE_RATE);
+  }
+  if (generationDone && audioQueue.length === 0 && !stretchFlushed) {
+    stretchFlushed = true;
+    for (const chunk of stretchProcessor.flush(currentSpeed)) {
+      scheduleOneChunk(chunk.data, chunk.inputSamples / SAMPLE_RATE);
+    }
   }
 
   if (audioQueue.length < 10 && workerWaiting) {
     workerWaiting = false;
     worker.postMessage({ type: 'resume-generation' });
   }
+  updateWordHighlight();
+  if (generationDone && audioQueue.length === 0 && ctx.currentTime >= nextStartTime) {
+    stopScheduler();
+    if (paragraphDoneResolve) {
+      const resolve = paragraphDoneResolve;
+      paragraphDoneResolve = null;
+      resolve();
+    }
+  }
 }
 
-function scheduleOneChunk(float32Data) {
+function scheduleOneChunk(stretchedData, rawDurationSec) {
   const ctx = getAudioContext();
-
-  // Time-stretch the chunk: inputLen → outputLen = inputLen / speed
-  // At speed=1.0 this is a no-op (outputLen == inputLen).
-  const rawDurationSec = float32Data.length / SAMPLE_RATE;
-  let stretchedData;
-  if (stretchProcessor && Math.abs(currentSpeed - 1.0) > 0.001) {
-    stretchedData = stretchProcessor.process(float32Data, currentSpeed);
-  } else {
-    stretchedData = float32Data;
-  }
 
   const buffer = ctx.createBuffer(1, stretchedData.length, SAMPLE_RATE);
   buffer.getChannelData(0).set(stretchedData);
@@ -339,48 +282,33 @@ function scheduleOneChunk(float32Data) {
   const playDurationSec = stretchedData.length / SAMPLE_RATE;
   const endTime = nextStartTime + playDurationSec;
 
-  const myInternalGen = internalGenCounter;
-  scheduledSources.push({ source, startTime: nextStartTime, endTime, rawDuration: rawDurationSec });
-  cumulativeScheduledSec += rawDurationSec;
-  sentenceAudioSec += rawDurationSec;
+  scheduledSources.push({ source, endTime });
+  paragraphSourceSec += rawDurationSec;
+  wordTimeline?.addAudio(rawDurationSec, nextStartTime, endTime);
   nextStartTime = endTime;
-
-  // Word timing: emit events synced to AudioContext playback time
-  if (wordTimingEstimator && currentSentenceMeta) {
-    const events = wordTimingEstimator.feedAudioDuration(sentenceAudioSec);
-    for (const evt of events) {
-      const calibratedTime = evt.estimatedTimeSec * timingCalibrationFactor;
-      const wordPlayTime = sentenceStartCtxTime + (calibratedTime / currentSpeed);
-      const delay = Math.max(0, wordPlayTime - ctx.currentTime);
-      const csGenId = currentGenId;
-      const paraWordIdx = currentSentenceMeta.words[evt.wordIndex]?.paraWordIdx ?? evt.wordIndex;
-      const wordEvent = {
-        type: 'tts-word',
-        genId: csGenId,
-        detail: {
-          paragraphIndex: currentSentenceMeta.paragraphIndex,
-          wordIndex: paraWordIdx,
-          word: currentSentenceMeta.words[evt.wordIndex]?.text || evt.word,
-        },
-      };
-      const tid = setTimeout(() => {
-        if (myInternalGen !== internalGenCounter || paused) return;
-        sendToServiceWorker(wordEvent);
-      }, delay * 1000);
-      pendingWordTimeouts.push(tid);
-    }
-  }
-
-  if (!paused) {
-    sendToServiceWorker({
-      type: 'tts-elapsed', genId: currentGenId, elapsedSec: cumulativeScheduledSec / currentSpeed,
-    });
-  }
 }
 
-function clearPendingWordEvents() {
-  for (const tid of pendingWordTimeouts) clearTimeout(tid);
-  pendingWordTimeouts = [];
+function updateWordHighlight() {
+  if (!wordTimeline || !currentParagraphMeta) return;
+  const word = wordTimeline.wordAt(getAudioContext().currentTime);
+  const wordIndex = word?.wordIndex ?? null;
+  if (wordIndex === lastWordIndex) return;
+  lastWordIndex = wordIndex;
+  const { paragraphIndex, sentenceWordOffsets } = currentParagraphMeta;
+  if (word) {
+    const sentenceIndex = sentenceWordOffsets.findLastIndex(offset => offset <= wordIndex);
+    if (sentenceIndex !== currentParagraphMeta.sentenceIndex) {
+      currentParagraphMeta.sentenceIndex = sentenceIndex;
+      sendToServiceWorker({
+        type: 'tts-sentence-event', genId: currentGenId,
+        detail: { paragraphIndex, sentenceIndex },
+      });
+    }
+  }
+  sendToServiceWorker({
+    type: 'tts-word', genId: currentGenId,
+    detail: { paragraphIndex, wordIndex, word: word?.word ?? '' },
+  });
 }
 
 function checkBackpressure() {
@@ -404,13 +332,13 @@ function cancelGeneration(internalGen) {
   }
   scheduledSources = [];
   audioQueue = [];
-  clearPendingWordEvents();
   nextStartTime = 0;
-  sentenceStartCtxTime = 0;
-  cumulativeScheduledSec = 0;
-  sentenceAudioSec = 0;
-  wordTimingEstimator = null;
-  currentSentenceMeta = null;
+  paragraphSourceSec = 0;
+  wordTimeline = null;
+  currentParagraphMeta = null;
+  lastWordIndex = null;
+  generationDone = false;
+  stretchFlushed = false;
   workerWaiting = false;
   stopScheduler();
 
@@ -426,10 +354,10 @@ function cancelGeneration(internalGen) {
     worker.postMessage({ type: 'cancel', genId: internalGen });
   }
 
-  // Unblock any paragraph loop awaiting sentence completion
-  if (sentenceDoneResolve) {
-    const resolve = sentenceDoneResolve;
-    sentenceDoneResolve = null;
+  // Unblock the cancelled paragraph request.
+  if (paragraphDoneResolve) {
+    const resolve = paragraphDoneResolve;
+    paragraphDoneResolve = null;
     resolve();
   }
 }
@@ -439,12 +367,16 @@ function cancelGeneration(internalGen) {
 browser.runtime.onMessage.addListener((msg) => {
   if (!msg || !msg.type || msg.source !== 'service-worker') return;
   logToSW(`[Offscreen] Received: ${msg.type}`);
+  if (['tts-pause', 'tts-resume', 'tts-cancel', 'tts-set-speed'].includes(msg.type) && !isOwner(msg)) return;
 
   switch (msg.type) {
     case 'tts-play-paragraph':
       handlePlayParagraph(msg).catch(err => {
         console.error('[Offscreen] handlePlayParagraph error:', err);
-        sendToServiceWorker({ type: 'tts-paragraph-done', genId: msg.genId, error: err.message });
+        // Load/download failures affect every paragraph: report them as fatal.
+        sendToServiceWorker({ type: 'tts-paragraph-done', error: err.message, fatal: true }, {
+          tabId: msg.tabId, sessionId: msg.sessionId, genId: msg.genId,
+        });
       });
       break;
     case 'tts-pause':
@@ -458,6 +390,7 @@ browser.runtime.onMessage.addListener((msg) => {
       activeLoadToken++;
       cancelGeneration(internalGenCounter - 1);
       currentGenId = msg.genId;
+      playbackOwner = null;
       break;
     case 'tts-set-speed':
       handleSetSpeed(msg.speed);
@@ -476,7 +409,7 @@ browser.runtime.onMessage.addListener((msg) => {
   }
 });
 
-async function getOrDownloadAsset({ cacheKey, url, asset, voiceId = null, language }) {
+async function getOrDownloadAsset({ cacheKey, url, asset, voiceId = null, language }, owner) {
   const cachedData = await getCached(cacheKey);
   if (cachedData) {
     logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) loaded from cache`);
@@ -484,64 +417,73 @@ async function getOrDownloadAsset({ cacheKey, url, asset, voiceId = null, langua
   }
 
   logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) not cached, downloading...`);
-  const downloadedData = await downloadWithProgress(url, cacheKey, asset, voiceId, language);
+  const downloadedData = await downloadWithProgress(url, cacheKey, asset, voiceId, language, owner);
   logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) download complete`);
   return downloadedData;
 }
 
-async function loadModelAssets(language) {
+async function loadModelAssets(language, owner) {
   const [modelData, tokenizerData] = await Promise.all([
     getOrDownloadAsset({
       cacheKey: getModelCacheKey(language),
       url: getModelUrl(language),
       asset: 'model',
       language,
-    }),
+    }, owner),
     getOrDownloadAsset({
       cacheKey: getTokenizerCacheKey(language),
       url: getTokenizerUrl(language),
       asset: 'tokenizer',
       language,
-    }),
+    }, owner),
   ]);
   const configData = new TextEncoder().encode(buildLanguageConfigYaml(language)).buffer;
   return { modelData, tokenizerData, configData };
 }
 
-async function loadVoiceAsset(language, voiceId) {
+async function loadVoiceAsset(language, voiceId, owner) {
   return getOrDownloadAsset({
     cacheKey: getVoiceCacheKey(language, voiceId),
     url: getVoiceUrl(language, voiceId),
     asset: 'voice',
     voiceId,
     language,
-  });
+  }, owner);
 }
 
 async function handlePlayParagraph(msg) {
+  // Only an explicit play can take ownership; a late completion's next paragraph cannot.
+  if (!msg.startPlayback && !isOwner(msg)) {
+    sendToServiceWorker({ type: 'tts-superseded' }, {
+      tabId: msg.tabId, sessionId: msg.sessionId, genId: msg.genId,
+    });
+    return;
+  }
   const {
     genId,
     paragraphText,
     paragraphIndex,
     startSentenceIndex,
-    originalSentenceCount,
-    originalWordCount,
-    startParaWordOffset,
+    sentenceWordOffsets,
+    startParaWordOffset = 0,
     voiceId,
     language = DEFAULT_LANGUAGE_ID,
     speed,
     tabId,
+    sessionId,
   } = msg;
   const effectiveVoiceId = voiceId || getDefaultVoiceForLanguage(language);
   logToSW(`[Offscreen] handlePlayParagraph: genId=${genId}, pIdx=${paragraphIndex}, language=${language}, voice=${effectiveVoiceId}, text="${paragraphText?.substring(0, 50)}"`);
 
-  const isNewGeneration = genId !== currentGenId || tabId !== currentTabId;
-  if (isNewGeneration) {
-    internalGenCounter++;
-    cancelGeneration(internalGenCounter - 1);
+  const isNewGeneration = !isOwner(msg);
+  if (isNewGeneration && playbackOwner) {
+    sendToServiceWorker({ type: 'tts-superseded' }, playbackOwner);
   }
-  currentTabId = tabId;
-  clearPendingWordEvents();
+  const owner = { tabId, sessionId, genId };
+  // Give every paragraph a unique worker ID, including continuous playback.
+  internalGenCounter++;
+  cancelGeneration(internalGenCounter - 1);
+  playbackOwner = owner;
 
   currentGenId = genId;
   currentSpeed = speed;
@@ -550,15 +492,10 @@ async function handlePlayParagraph(msg) {
 
   const ctx = getAudioContext();
 
-  if (isNewGeneration) {
-    paused = false;
-    if (ctx.state === 'suspended') await ctx.resume();
-    cumulativeScheduledSec = 0;
-    nextStartTime = ctx.currentTime;
-    totalEstimatedSec = 0;
-    totalActualSec = 0;
-    timingCalibrationFactor = 1.0;
-  }
+  if (isNewGeneration) paused = false;
+  if (!paused && ctx.state === 'suspended') await ctx.resume();
+  if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
+  nextStartTime = ctx.currentTime;
 
   // Always reset stretch processor between paragraphs to flush STFT
   // overlap-add state that would otherwise bleed the previous paragraph's
@@ -573,8 +510,8 @@ async function handlePlayParagraph(msg) {
     voiceId: effectiveVoiceId,
   });
 
-  const modelAssets = loadPlan.loadModel ? await loadModelAssets(language) : null;
-  const voiceData = loadPlan.loadVoice ? await loadVoiceAsset(language, effectiveVoiceId) : null;
+  const modelAssets = loadPlan.loadModel ? await loadModelAssets(language, owner) : null;
+  const voiceData = loadPlan.loadVoice ? await loadVoiceAsset(language, effectiveVoiceId, owner) : null;
   if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 
   const workerReady = await ensureWorker(modelAssets, voiceData, effectiveVoiceId, language, myInternalGen, myLoadToken);
@@ -592,119 +529,31 @@ async function handlePlayParagraph(msg) {
     nextStartTime = ctx.currentTime;
   }
 
+  // Keep source spelling and indices intact. pocket-tts handles internal text
+  // splitting while retaining one cumulative timestamp clock for this stream.
+  const pageWords = [...paragraphText.matchAll(/\S+/g)];
+  const startOffset = pageWords[startParaWordOffset]?.index ?? paragraphText.length;
+  const text = paragraphText.slice(startOffset);
+  wordTimeline = createWordTimeline(text, startParaWordOffset, {
+    inputLatency: stretchProcessor.inputLatency / SAMPLE_RATE,
+    outputLatency: stretchProcessor.outputLatency / SAMPLE_RATE,
+  });
+  currentParagraphMeta = { paragraphIndex, sentenceWordOffsets, sentenceIndex: startSentenceIndex };
+  sendToServiceWorker({
+    type: 'tts-sentence-event', genId,
+    detail: { paragraphIndex, sentenceIndex: startSentenceIndex },
+  }, owner);
+  // Clear the previous page word while waiting for the first native boundary.
+  sendToServiceWorker({ type: 'tts-word', genId, detail: { paragraphIndex, wordIndex: null, word: '' } }, owner);
+  const finished = new Promise(resolve => { paragraphDoneResolve = resolve; });
   startScheduler();
-
-  // English-only abbreviation expansion and text normalization before sentence splitting.
-  let normalizedParaText = paragraphText;
-  if (language === 'english') {
-    const abbrevMap = await loadAbbreviations();
-    const expandedParaText = expandAbbreviations(paragraphText, abbrevMap);
-    await ensureTextProcessing();
-    normalizedParaText = tnNormalizeSentence(expandedParaText);
-    if (normalizedParaText !== expandedParaText) {
-      logToSW(`[Offscreen] Para TN: "${expandedParaText.substring(0, 60)}" → "${normalizedParaText.substring(0, 60)}"`);
-    }
-  } else {
-    logToSW(`[Offscreen] Skipping English text normalization for language=${language}`);
-  }
-
+  worker.postMessage({ type: 'generate', genId: myInternalGen, text, voiceId: effectiveVoiceId });
+  await finished;
   if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 
-  // Split normalized paragraph into sentences using abbreviation-aware splitter
-  const normSentences = splitSentencesOffscreen(normalizedParaText);
-  const normTotal = normSentences.length;
-  const origTotal = originalSentenceCount || 1;
-
-  // Map startSentenceIndex (original) to normalized sentence index
-  const startNormIdx = origTotal > 0
-    ? Math.min(Math.round(startSentenceIndex * normTotal / origTotal), Math.max(0, normTotal - 1))
-    : 0;
-
-  logToSW(`[Offscreen] Para ${paragraphIndex}: ${normTotal} norm sentences (orig ${origTotal}), starting at norm[${startNormIdx}]`);
-
-  // Running paragraph-level word offset — increments by actual normalized word count per sentence
-  let paraWordOffset = startParaWordOffset || 0;
-  // Skip ahead past any normalized sentences before our start index
-  for (let nIdx = 0; nIdx < startNormIdx; nIdx++) {
-    paraWordOffset += normSentences[nIdx].trim().split(/\s+/).filter(Boolean).length;
-  }
-
-  for (let nIdx = startNormIdx; nIdx < normSentences.length; nIdx++) {
-    if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
-
-    const normSentText = normSentences[nIdx].trim();
-    if (!normSentText) continue;
-
-    // Map normalized sentence index back to original sentence index (for sentence events and history)
-    const origSentIdx = Math.min(Math.round(nIdx * origTotal / normTotal), origTotal - 1);
-
-    // Update timing calibration from previous sentence
-    if (nIdx > startNormIdx && sentenceAudioSec > 0 && currentSentenceMeta) {
-      const prevNumWords = currentSentenceMeta.words?.length || 1;
-      const estimatedFrames = Math.ceil((prevNumWords / 3 + 2) * 12.5);
-      const estimatedSec = estimatedFrames / 12.5;
-      totalEstimatedSec += estimatedSec;
-      totalActualSec += sentenceAudioSec;
-      if (totalEstimatedSec > 0) {
-        timingCalibrationFactor = totalActualSec / totalEstimatedSec;
-        logToSW(`[Offscreen] Timing calibration: factor=${timingCalibrationFactor.toFixed(3)}`);
-      }
-    }
-
-    // Build normalized word list with paragraph-relative word index for each word
-    const normWordTexts = normSentText.split(/\s+/).filter(Boolean);
-    const numNormWords = normWordTexts.length;
-    const maxParaWordIdx = Math.max(0, (originalWordCount || 1) - 1);
-    const sentenceWords = normWordTexts.map((w, i) => ({
-      text: w,
-      startOffset: 0,
-      endOffset: w.length,
-      paraWordIdx: Math.min(paraWordOffset + i, maxParaWordIdx),
-    }));
-
-    currentSentenceMeta = { paragraphIndex, sentenceIndex: origSentIdx, words: sentenceWords };
-    sentenceAudioSec = 0;
-    sentenceStartCtxTime = nextStartTime;
-
-    const estimatedFrames = Math.ceil((numNormWords / 3 + 2) * 12.5);
-    wordTimingEstimator = createWordTimingEstimator(sentenceWords, estimatedFrames / 12.5);
-
-    // Notify content script that a new sentence is starting
-    sendToServiceWorker({
-      type: 'tts-sentence-event',
-      genId: currentGenId,
-      detail: { paragraphIndex, sentenceIndex: origSentIdx, text: normSentText },
-    });
-
-    worker.postMessage({ type: 'generate', genId: myInternalGen, text: normSentText, voiceId: effectiveVoiceId });
-    logToSW(`[Offscreen] Generate norm[${nIdx}]→origSent[${origSentIdx}]: "${normSentText.substring(0, 60)}"`);
-
-    // Wait for this sentence's audio to finish playing before moving to the next
-    await new Promise(resolve => { sentenceDoneResolve = resolve; });
-    sentenceDoneResolve = null;
-
-    if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
-
-    // Advance paragraph-level word offset by the number of words just spoken
-    paraWordOffset += numNormWords;
-  }
-
-  // Contribute the last sentence of this paragraph to calibration.
-  // The in-loop update runs at the START of each sentence N+1 using sentence N's data,
-  // so the final sentence never gets a chance to update — we do it here instead.
-  if (sentenceAudioSec > 0 && currentSentenceMeta) {
-    const lastNumWords = currentSentenceMeta.words?.length || 1;
-    const estimatedFrames = Math.ceil((lastNumWords / 3 + 2) * 12.5);
-    const estimatedSec = estimatedFrames / 12.5;
-    totalEstimatedSec += estimatedSec;
-    totalActualSec += sentenceAudioSec;
-    if (totalEstimatedSec > 0) {
-      timingCalibrationFactor = totalActualSec / totalEstimatedSec;
-      logToSW(`[Offscreen] Post-para timing calibration: factor=${timingCalibrationFactor.toFixed(3)}`);
-    }
-  }
-
-  sendToServiceWorker({ type: 'tts-paragraph-done', genId: currentGenId });
+  // Report the paragraph's audio length at 1x so the page can calibrate its
+  // remaining-time estimate.
+  sendToServiceWorker({ type: 'tts-paragraph-done', sourceSec: paragraphSourceSec }, owner);
   logToSW(`[Offscreen] Paragraph ${paragraphIndex} complete`);
 }
 
@@ -729,9 +578,11 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language, requestIn
       logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
     };
     const wasmJsUrl = browser.runtime.getURL('wasm/pocket_tts.js');
+    const timestamps = /^timestamp_heads:\s*\[/m.test(buildLanguageConfigYaml(language));
+    if (!timestamps) logToSW(`[Offscreen] ${language} has no calibrated timestamp heads; playing without word highlights`);
     const workerForLoad = worker;
     workerForLoad.postMessage(
-      { type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language },
+      { type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language, timestamps },
       [modelData, tokenizerData, configData],
     );
     if (!isCurrent()) return false;
@@ -846,7 +697,13 @@ function handleWorkerMessage(msg) {
     return;
   }
   switch (msg.type) {
+    case 'words': {
+      if (msg.genId !== internalGenCounter) return;
+      wordTimeline?.addEvents(msg.events);
+      break;
+    }
     case 'chunk': {
+      if (msg.genId !== internalGenCounter) return;
       enqueueChunk(msg.data, msg.genId);
       checkBackpressure();
       break;
@@ -854,56 +711,17 @@ function handleWorkerMessage(msg) {
     case 'done': {
       logToSW(`[Offscreen] Worker done for genId: ${msg.genId} (internal=${internalGenCounter})`);
       if (msg.genId !== internalGenCounter) return;
-
-      // Finalize word timing
-      if (wordTimingEstimator && currentSentenceMeta) {
-        const remaining = wordTimingEstimator.finalize();
-        const ctx = getAudioContext();
-        for (const evt of remaining) {
-          const calibratedTime = evt.estimatedTimeSec * timingCalibrationFactor;
-          const wordPlayTime = sentenceStartCtxTime + (calibratedTime / currentSpeed);
-          const delay = Math.max(0, wordPlayTime - ctx.currentTime);
-          const paraWordIdx = currentSentenceMeta.words[evt.wordIndex]?.paraWordIdx ?? evt.wordIndex;
-          const wordEvent = {
-            type: 'tts-word',
-            genId: currentGenId,
-            detail: {
-              paragraphIndex: currentSentenceMeta.paragraphIndex,
-              wordIndex: paraWordIdx,
-              word: currentSentenceMeta.words[evt.wordIndex]?.text || evt.word,
-            },
-          };
-          const myGen = internalGenCounter;
-          const tid = setTimeout(() => {
-            if (myGen !== internalGenCounter || paused) return;
-            sendToServiceWorker(wordEvent);
-          }, delay * 1000);
-          pendingWordTimeouts.push(tid);
-        }
-      }
-
-      // Wait for audio to finish, then resolve the sentence promise in handlePlayParagraph
-      const doneInternalGen = internalGenCounter;
-      function checkAndResolve() {
-        if (doneInternalGen !== internalGenCounter) {
-          if (sentenceDoneResolve) { sentenceDoneResolve(); sentenceDoneResolve = null; }
-          return;
-        }
-        if (paused) { setTimeout(checkAndResolve, 100); return; }
-        const now = getAudioContext().currentTime;
-        if (now >= nextStartTime - 0.05) {
-          if (sentenceDoneResolve) { sentenceDoneResolve(); sentenceDoneResolve = null; }
-        } else {
-          setTimeout(checkAndResolve, Math.max(50, (nextStartTime - now) * 500));
-        }
-      }
-      checkAndResolve();
+      generationDone = true;
+      drainQueue();
       break;
     }
     case 'error': {
+      if (msg.genId === undefined || msg.genId !== internalGenCounter) return;
       console.error('[Pocket Speechify] Worker error:', msg.error);
+      internalGenCounter++;
+      cancelGeneration(internalGenCounter - 1);
       sendToServiceWorker({
-        type: 'tts-sentence-done', genId: currentGenId, error: msg.error,
+        type: 'tts-paragraph-done', genId: currentGenId, error: msg.error,
       });
       break;
     }

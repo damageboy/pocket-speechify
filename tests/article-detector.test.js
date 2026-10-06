@@ -2,26 +2,14 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { detectReadableArticle } from "../src/article-detector.js";
 import { extractContent } from "../src/content-extractor.js";
 
-// In happy-dom, node.offsetParent is always null, which causes the extractor
-// to reject all elements. Match the content-extractor tests by patching it.
-function makeOffsetParentNonNull(el) {
-	Object.defineProperty(el, "offsetParent", {
-		get: () => document.body,
-		configurable: true,
-	});
-}
-
 function setPageHtml({ head = "", body = "" }) {
 	document.head.innerHTML = head;
 	document.body.innerHTML = body;
-	document.body
-		.querySelectorAll("*")
-		.forEach((el) => makeOffsetParentNonNull(el));
 }
 
 function detectPage() {
 	const paragraphs = extractContent();
-	return detectReadableArticle(document, paragraphs, { isVisible: () => true });
+	return detectReadableArticle(document, paragraphs);
 }
 
 function proseParagraph(wordCount, prefix = "Article") {

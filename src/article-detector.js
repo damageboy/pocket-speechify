@@ -1,3 +1,5 @@
+import { isExcludedElement, isVisibleElement } from "./dom-utils.js";
+
 const PROSE_TAGS = new Set(["P", "BLOCKQUOTE"]);
 const HEADING_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 const SKIP_TAGS = new Set([
@@ -19,7 +21,7 @@ const TEXT_NODE = 3;
 
 export function detectReadableArticle(doc, paragraphs, options = {}) {
 	const documentRef = doc || document;
-	const isVisible = options.isVisible || defaultIsVisible;
+	const isVisible = options.isVisible || isVisibleElement;
 	const metadataFound = hasArticleMetadata(documentRef, isVisible);
 	const candidates = collectCandidateRoots(documentRef, isVisible);
 
@@ -197,13 +199,12 @@ function visitVisibleText(node, isVisible, onText) {
 	if (!node) return;
 
 	if (node.nodeType === TEXT_NODE) {
-		onText(node);
+		if (isVisible(node.parentElement)) onText(node);
 		return;
 	}
 
 	if (node.nodeType !== ELEMENT_NODE) return;
 	if (hasSkippedOrHiddenSelf(node)) return;
-	if (!isVisible(node)) return;
 
 	node.childNodes.forEach((child) =>
 		visitVisibleText(child, isVisible, onText),
@@ -233,7 +234,7 @@ function hasSkippedOrHiddenAncestor(element, stopAt) {
 function hasSkippedOrHiddenSelf(element) {
 	return (
 		SKIP_TAGS.has(element.tagName) ||
-		element.getAttribute("aria-hidden") === "true"
+		isExcludedElement(element)
 	);
 }
 
@@ -334,14 +335,6 @@ function normalizeText(text) {
 	return String(text || "")
 		.replace(/\s+/g, " ")
 		.trim();
-}
-
-function defaultIsVisible(element) {
-	return (
-		!!element &&
-		typeof element.getClientRects === "function" &&
-		element.getClientRects().length > 0
-	);
 }
 
 function clamp(value, min, max) {

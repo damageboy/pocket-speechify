@@ -1,218 +1,102 @@
-import { createRangeFromOffsets, scrollToCenter } from './dom-utils.js';
+import { createRangeFromOffsets, isProgrammaticScroll, scrollToCenter } from './dom-utils.js';
 
-/**
- * Resolve the effective background color of an element by walking up
- * the DOM tree until we find a non-transparent background.
- */
-function getEffectiveBackground(el) {
-  let node = el;
-  while (node && node !== document.documentElement) {
-    const bg = getComputedStyle(node).backgroundColor;
-    const match = bg.match(/\d+/g);
-    if (match) {
-      const [r, g, b, a] = match.map(Number);
-      if (a !== 0 && (r + g + b > 0 || a === undefined)) {
-        return { r, g, b };
-      }
-    }
-    node = node.parentElement;
-  }
-  return { r: 255, g: 255, b: 255 };
-}
-
-function luminance({ r, g, b }) {
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-}
-
-function deriveHighlightColors(bgColor) {
-  const lum = luminance(bgColor);
-  if (lum > 0.5) {
-    return {
-      sentenceColor: 'rgba(171, 179, 254, 0.35)',
-      wordColor: 'rgba(86, 102, 240, 0.30)',
-    };
-  } else {
-    return {
-      sentenceColor: 'rgba(68, 71, 102, 0.6)',
-      wordColor: 'rgba(86, 102, 240, 0.6)',
-    };
-  }
-}
-
-function clearHighlights() {
-  document.querySelectorAll('[data-ps-highlight]').forEach(el => el.remove());
-  paragraphOverlay = null;
-}
-
-/**
- * Create an overlay positioned in document coordinates (position: absolute).
- * Rects from getBoundingClientRect() are viewport-relative, so we add scroll offsets.
- */
-function createOverlay(rect, color) {
-  const div = document.createElement('div');
-  div.setAttribute('data-ps-highlight', 'overlay');
-  div.style.cssText = [
-    'position: absolute',
-    `top: ${rect.top + window.scrollY}px`,
-    `left: ${rect.left + window.scrollX}px`,
-    `width: ${rect.width}px`,
-    `height: ${rect.height}px`,
-    `background-color: ${color}`,
-    'pointer-events: none',
-    'border-radius: 3px',
-    'z-index: 2147483644',
-    'mix-blend-mode: multiply',
-  ].join('; ');
-  return div;
-}
-
-let lastParaIdx = null;
-let paragraphOverlay = null;
-let cachedColors = null;
-let cachedColorParaIdx = null;
-
-// --- Auto-scroll control ---
-// Auto-scroll is disabled as soon as the user manually scrolls.
-// It only re-enables when the user explicitly clicks the scroll-nav widget
-// or when playback resets to idle.
+const PARAGRAPH_HIGHLIGHT = 'pocket-speechify-paragraph';
+const WORD_HIGHLIGHT = 'pocket-speechify-word';
+const AUTO_SCROLL_MARGIN_PX = 60;
 let autoScrollEnabled = true;
-let lastProgrammaticScroll = false;
 
-function onUserScroll() {
-  if (lastProgrammaticScroll) {
-    lastProgrammaticScroll = false;
-    return;
+function isDarkBackground(element) {
+  for (let node = element; node; node = node.parentElement) {
+    const match = getComputedStyle(node).backgroundColor.match(/[\d.]+/g);
+    if (!match) continue;
+    const [r, g, b, a = 1] = match.map(Number);
+    if (a > 0) return (0.299 * r + 0.587 * g + 0.114 * b) / 255 <= 0.5;
   }
-  autoScrollEnabled = false;
+  return false;
 }
 
-function updateHighlights(currentState, paragraphs) {
-  const { currentParagraphIndex: pIdx, currentWordIndex: wIdx } = currentState;
-
-  if (pIdx === null || wIdx === null) {
-    clearHighlights();
-    lastParaIdx = null;
-    return;
-  }
-
-  const para = paragraphs[pIdx];
-  if (!para) { clearHighlights(); lastParaIdx = null; return; }
-
-  const word = para.words[wIdx];
-  if (!word) { clearHighlights(); lastParaIdx = null; return; }
-
-  // Derive colors from paragraph background (cached per paragraph)
-  if (cachedColorParaIdx !== pIdx) {
-    const bgColor = getEffectiveBackground(para.element);
-    cachedColors = deriveHighlightColors(bgColor);
-    cachedColorParaIdx = pIdx;
-  }
-  const { sentenceColor, wordColor } = cachedColors;
-
-  // Paragraph background overlay — single solid rectangle covering the whole element.
-  // Redrawn only when the paragraph changes.
-  if (lastParaIdx !== pIdx) {
-    clearHighlights();
-    const paraRect = para.element.getBoundingClientRect();
-    if (paraRect.width > 0 && paraRect.height > 0) {
-      paragraphOverlay = document.createElement('div');
-      paragraphOverlay.setAttribute('data-ps-highlight', 'para');
-      paragraphOverlay.style.cssText = [
-        'position: absolute',
-        `top: ${paraRect.top + window.scrollY}px`,
-        `left: ${paraRect.left + window.scrollX}px`,
-        `width: ${paraRect.width}px`,
-        `height: ${paraRect.height}px`,
-        `background-color: ${sentenceColor}`,
-        'pointer-events: none',
-        'border-radius: 0',
-        'z-index: 2147483644',
-        'mix-blend-mode: multiply',
-      ].join('; ');
-      document.body.appendChild(paragraphOverlay);
-    }
-    lastParaIdx = pIdx;
-  } else {
-    // Remove only word overlays, keep paragraph overlay
-    document.querySelectorAll('[data-ps-highlight="word"]').forEach(el => el.remove());
-  }
-
-  // Word highlight
-  const wordRange = createRangeFromOffsets(para.element, word.startOffset, word.endOffset);
-  const wordRect = wordRange.getBoundingClientRect();
-  if (wordRect.width > 0 && wordRect.height > 0) {
-    const overlay = createOverlay(wordRect, wordColor);
-    overlay.setAttribute('data-ps-highlight', 'word');
-    document.body.appendChild(overlay);
-
-    if (autoScrollEnabled) {
-      const viewportHeight = window.innerHeight;
-      if (wordRect.top < -100 || wordRect.bottom > viewportHeight + 100) {
-        lastProgrammaticScroll = true;
-        scrollToCenter(wordRect);
-      }
-    }
-  }
-}
-
-/**
- * Merge client rects on the same line to eliminate seams at inline element boundaries.
- */
-function mergeRects(rects) {
-  if (rects.length === 0) return [];
-
-  const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left);
-  const merged = [];
-  let current = { top: sorted[0].top, left: sorted[0].left, right: sorted[0].right, bottom: sorted[0].bottom };
-
-  for (let i = 1; i < sorted.length; i++) {
-    const rect = sorted[i];
-    const overlapThreshold = Math.min(current.bottom - current.top, rect.bottom - rect.top) * 0.5;
-    const verticalOverlap = Math.min(current.bottom, rect.bottom) - Math.max(current.top, rect.top);
-
-    if (verticalOverlap >= overlapThreshold && rect.left <= current.right + 2) {
-      current.right = Math.max(current.right, rect.right);
-      current.top = Math.min(current.top, rect.top);
-      current.bottom = Math.max(current.bottom, rect.bottom);
-    } else {
-      merged.push(current);
-      current = { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom };
-    }
-  }
-  merged.push(current);
-
-  return merged.map(r => ({
-    top: r.top,
-    left: r.left,
-    width: r.right - r.left,
-    height: r.bottom - r.top,
-  }));
-}
-
-/** Re-enable auto-scroll (called by scroll-nav when user clicks to scroll back) */
+/** Re-enable following after the user clicks scroll-to-highlight. */
 export function enableAutoScroll() {
   autoScrollEnabled = true;
 }
 
 export function initHighlights(state, paragraphs) {
-  // Listen for user scroll to disable auto-scroll temporarily
-  window.addEventListener('scroll', onUserScroll, { passive: true });
+  // Native ranges follow layout, transforms, line wrapping and scroll clipping.
+  // No positioned overlays or geometry invalidation are needed.
+  const style = document.createElement('style');
+  style.dataset.psHighlight = 'style';
+  document.head.appendChild(style);
+  let lastParagraph = null;
 
-  state.subscribe((current, prev) => {
-    if (current.playback === 'idle' && prev.playback !== 'idle') {
-      clearHighlights();
-      lastParaIdx = null;
-      cachedColorParaIdx = null;
-      autoScrollEnabled = true;
+  function clear() {
+    CSS.highlights.delete(PARAGRAPH_HIGHLIGHT);
+    CSS.highlights.delete(WORD_HIGHLIGHT);
+    lastParagraph = null;
+  }
+
+  function update(current, follow = false) {
+    const paragraph = current.currentParagraphIndex === null ? null : paragraphs[current.currentParagraphIndex];
+    if (current.playback === 'idle' || !paragraph) {
+      clear();
       return;
     }
-    if (current.playback === 'playing' || current.playback === 'paused') {
-      if (
-        current.currentWordIndex !== prev.currentWordIndex ||
-        current.currentParagraphIndex !== prev.currentParagraphIndex
-      ) {
-        updateHighlights(current, paragraphs);
+
+    if (lastParagraph !== paragraph) {
+      clear();
+      const dark = isDarkBackground(paragraph.element);
+      style.textContent = `
+        ::highlight(${PARAGRAPH_HIGHLIGHT}) { background-color: ${dark ? '#444766' : '#e0e3ff'}; }
+        ::highlight(${WORD_HIGHLIGHT}) { background-color: ${dark ? '#5666f0' : '#abb3fe'}; }
+      `;
+      const range = createRangeFromOffsets(paragraph.element, paragraph.startOffset, paragraph.endOffset);
+      if (range) {
+        const highlight = new Highlight(range);
+        highlight.priority = 0;
+        CSS.highlights.set(PARAGRAPH_HIGHLIGHT, highlight);
       }
+      lastParagraph = paragraph;
+    }
+
+    CSS.highlights.delete(WORD_HIGHLIGHT);
+    const word = paragraph.words[current.currentWordIndex];
+    if (!word) return; // Native timestamp gaps leave only the paragraph highlighted.
+    const range = createRangeFromOffsets(paragraph.element, word.startOffset, word.endOffset);
+    if (!range) return;
+    const highlight = new Highlight(range);
+    highlight.priority = 1;
+    CSS.highlights.set(WORD_HIGHLIGHT, highlight);
+
+    if (follow && autoScrollEnabled && !isProgrammaticScroll()) {
+      const rect = range.getBoundingClientRect();
+      if (rect.height > 0 && (rect.top < AUTO_SCROLL_MARGIN_PX ||
+          rect.bottom > window.innerHeight - AUTO_SCROLL_MARGIN_PX)) scrollToCenter(rect);
+    }
+  }
+
+  function onScroll() {
+    if (isProgrammaticScroll() || !autoScrollEnabled) return;
+    console.log('[Pocket Speechify] User scroll triggered — auto-scroll disabled');
+    autoScrollEnabled = false;
+  }
+  window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+  const unsubscribe = state.subscribe((current, prev) => {
+    if (current.playback === 'idle') {
+      clear();
+      autoScrollEnabled = true;
+    } else if (current.currentWordIndex !== prev.currentWordIndex ||
+        current.currentParagraphIndex !== prev.currentParagraphIndex) {
+      update(current, true);
     }
   });
+
+  return {
+    // A source refresh may replace DOM text nodes without changing indices.
+    refresh() { lastParagraph = null; update(state.get()); },
+    destroy() {
+      unsubscribe();
+      window.removeEventListener('scroll', onScroll, true);
+      clear();
+      style.remove();
+    },
+  };
 }

@@ -35,7 +35,7 @@ There are 4 execution contexts. Each has different API access. **Never assume an
 - **Has access to:** DOM, `chrome.runtime.sendMessage()`, `chrome.runtime.onMessage`
 - **Does NOT have:** Cache API (operates on page origin, not extension origin), `chrome.offscreen`, `chrome.tabs`, AudioContext for TTS
 - **Console visible in:** page DevTools (F12)
-- **Files:** `content.js`, `src/remote-tts.js`, `src/pill-player.js`, `src/side-panels.js`, `src/highlight.js`, `src/hover-player.js`, `src/scroll-nav.js`, `src/state.js`, `src/voices.js`, `src/content-extractor.js`, `src/icons.js`, `src/dom-utils.js`, `src/logger.js`, `src/mock-tts.js`
+- **Files:** `content.js`, `src/remote-tts.js`, `src/pill-player.js`, `src/side-panels.js`, `src/highlight.js`, `src/hover-player.js`, `src/scroll-nav.js`, `src/state.js`, `src/voices.js`, `src/content-extractor.js`, `src/icons.js`, `src/dom-utils.js`, `src/logger.js`
 
 ### Service Worker (service-worker.js)
 

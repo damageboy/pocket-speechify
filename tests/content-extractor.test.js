@@ -1,22 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { extractContent } from "../src/content-extractor.js";
-
-// In happy-dom, node.offsetParent is always null, which causes the extractor
-// to reject all elements (line: if (node.offsetParent === null && node.tagName !== 'BODY') FILTER_REJECT).
-// We patch offsetParent on each node using Object.defineProperty before extraction.
-function makeOffsetParentNonNull(el) {
-	Object.defineProperty(el, "offsetParent", {
-		get: () => document.body,
-		configurable: true,
-	});
-}
+import { createRangeFromOffsets } from "../src/dom-utils.js";
 
 function setBodyHtml(html) {
 	document.body.innerHTML = html;
-	// Patch all elements in body to have a non-null offsetParent
-	document.body
-		.querySelectorAll("*")
-		.forEach((el) => makeOffsetParentNonNull(el));
 }
 
 beforeEach(() => {
@@ -69,9 +56,6 @@ describe("extractContent", () => {
       <footer><p>Footer text</p></footer>
       <p>Main content.</p>
     `);
-		document.body
-			.querySelectorAll("*")
-			.forEach((el) => makeOffsetParentNonNull(el));
 		const paragraphs = extractContent();
 		expect(paragraphs.length).toBe(1);
 		expect(paragraphs[0].text).toBe("Main content.");
@@ -175,5 +159,121 @@ describe("extractContent", () => {
 		// div is not in BLOCK_TAGS, only p should be extracted
 		expect(paragraphs.length).toBe(1);
 		expect(paragraphs[0].text).toBe("A paragraph.");
+	});
+});
+
+const texts = (paragraphs) => paragraphs.map((paragraph) => paragraph.text);
+
+describe("extractContent nesting and hidden text", () => {
+	it("keeps before, nested blocks, and after fragments in DOM order with full-element offsets", () => {
+		setBodyHtml("<blockquote>  Before.<div><p>Middle.</p></div> After. </blockquote>");
+		const paragraphs = extractContent();
+		expect(texts(paragraphs)).toEqual(["Before.", "Middle.", "After."]);
+		expect(paragraphs[0].element).toBe(paragraphs[2].element);
+		for (const paragraph of paragraphs) {
+			expect(createRangeFromOffsets(paragraph.element, paragraph.startOffset, paragraph.endOffset).toString()).toBe(paragraph.text);
+			for (const word of paragraph.words) {
+				expect(createRangeFromOffsets(paragraph.element, word.startOffset, word.endOffset).toString()).toBe(word.text);
+			}
+		}
+	});
+
+	it("excludes visibility-hidden text but keeps explicitly visible descendants", () => {
+		setBodyHtml('<div style="visibility:hidden"><p>Hidden.</p><p style="visibility:visible">Override.</p></div><p>Start <span style="visibility:hidden">gone <b style="visibility:visible">kept</b></span> end.</p>');
+		expect(texts(extractContent())).toEqual(["Override.", "Start kept end."]);
+	});
+
+	it("keeps fixed paragraphs and display-contents paragraph descendants without offsetParent", () => {
+		document.body.innerHTML = '<p style="position:fixed">Fixed.</p><blockquote style="display:contents"><p>Nested.</p></blockquote><div style="display:none"><p>Gone.</p></div>';
+		for (const element of document.querySelectorAll("p,blockquote")) {
+			Object.defineProperty(element, "offsetParent", { get: () => null, configurable: true });
+		}
+		expect(texts(extractContent())).toEqual(["Fixed.", "Nested."]);
+	});
+
+	it("reads nested paragraph blocks once", () => {
+		setBodyHtml(
+			"<blockquote><p>First quote.</p><p>Second quote.</p></blockquote>",
+		);
+		expect(texts(extractContent())).toEqual(["First quote.", "Second quote."]);
+	});
+
+	it("does not repeat nested list items in their parent item", () => {
+		setBodyHtml(
+			"<ul><li>Parent item.<ul><li>Child A.</li><li>Child B.</li></ul></li></ul>",
+		);
+		expect(texts(extractContent())).toEqual([
+			"Parent item.",
+			"Child A.",
+			"Child B.",
+		]);
+	});
+
+	it("skips hidden inline text", () => {
+		setBodyHtml(
+			'<p>Visible text.<span style="display:none">HIDDEN.</span><span aria-hidden="true">ARIA.</span><script>var x;</script></p>',
+		);
+		expect(texts(extractContent())).toEqual(["Visible text."]);
+	});
+
+	it("separates words at <br> and inner block boundaries", () => {
+		setBodyHtml("<p>Line one<br>Line two</p><li><div>Cell a</div><div>Cell b</div></li>");
+		const [br, divs] = extractContent();
+		expect(br.words.map((word) => word.text)).toEqual(["Line", "one", "Line", "two"]);
+		expect(divs.words.map((word) => word.text)).toEqual(["Cell", "a", "Cell", "b"]);
+	});
+});
+
+describe("word offsets map onto the DOM", () => {
+	it.each([
+		["leading whitespace", "<p>\n      Hello brave world.</p>"],
+		["inline markup", "<p>  <b>Bold</b> lead and <i>ta</i>il.</p>"],
+		["hidden span and br", '<p> Before <span style="display:none">gone</span>after<br>next line.</p>'],
+		["nested block", "<li>  Parent words.<ul><li>Child.</li></ul> tail end.</li>"],
+	])("highlights exactly each word with %s", (_, html) => {
+		setBodyHtml(html);
+		const [paragraph] = extractContent();
+		for (const word of paragraph.words) {
+			const range = createRangeFromOffsets(
+				paragraph.element,
+				word.startOffset,
+				word.endOffset,
+			);
+			expect(range.toString()).toBe(word.text);
+		}
+	});
+});
+
+describe("sentence splitting", () => {
+	function sentencesOf(text) {
+		setBodyHtml(`<p>${text}</p>`);
+		return extractContent()[0].sentences.map((sentence) => sentence.text);
+	}
+
+	it("does not split after titles, initials, or before lowercase words", () => {
+		expect(
+			sentencesOf("Dr. Smith met J. K. Rowling in the U.S. on Jan. 5. Pi is 3.14, e.g. a number. Done."),
+		).toEqual([
+			"Dr. Smith met J. K. Rowling in the U.S. on Jan. 5.",
+			"Pi is 3.14, e.g. a number.",
+			"Done.",
+		]);
+	});
+
+	it("splits after closing quotes and ellipses", () => {
+		expect(sentencesOf('He said "Hi." Then he left... Ok?! Yes.')).toEqual([
+			'He said "Hi."',
+			"Then he left...",
+			"Ok?!",
+			"Yes.",
+		]);
+	});
+
+	it("keeps sentence words identical to paragraph-level whitespace words", () => {
+		setBodyHtml('<p> A "quote." Then (Fig. 2) more… End!</p>');
+		const [paragraph] = extractContent();
+		expect(paragraph.words.map((word) => word.text)).toEqual(
+			paragraph.text.match(/\S+/g),
+		);
 	});
 });

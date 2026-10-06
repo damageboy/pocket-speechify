@@ -19,6 +19,7 @@ docs/superpowers/
 
 node_modules/
 .output/
+.wxt/
 
 # Git worktrees
 .worktrees/

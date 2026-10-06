@@ -25,7 +25,6 @@ check "entrypoints/background.js"
 
 # Source modules
 check "src/remote-tts.js"
-check "src/mock-tts.js"
 check "src/state.js"
 check "src/voices.js"
 check "src/pill-player.js"
@@ -37,27 +36,16 @@ check "src/content-extractor.js"
 check "src/icons.js"
 check "src/dom-utils.js"
 check "src/logger.js"
-check "src/word-timing-estimator.js"
+check "src/word-timeline.js"
 check "public/tts-worker.js"
 
 # CSS
 check "public/css/player.css"
 
-# WASM artifacts — rebuild if missing
-if [ ! -f "public/wasm/pocket_tts_bg.wasm" ] || [ ! -f "public/wasm/pocket_tts.js" ]; then
-  echo "WASM artifacts missing — attempting rebuild..."
-  if command -v cargo &>/dev/null && command -v wasm-pack &>/dev/null; then
-    bash scripts/build-wasm.sh
-    if [ ! -f "public/wasm/pocket_tts_bg.wasm" ]; then
-      echo "ERROR: WASM rebuild failed"
-      ERRORS=$((ERRORS + 1))
-    else
-      echo "WASM rebuilt successfully"
-    fi
-  else
-    echo "ERROR: public/wasm/pocket_tts_bg.wasm missing and cannot rebuild (need cargo + wasm-pack)"
-    ERRORS=$((ERRORS + 1))
-  fi
+# WASM artifacts — install if missing
+if [ ! -f "public/wasm/pocket_tts_bg.wasm" ] || [ ! -f "public/wasm/pocket_tts.js" ] || [ ! -f "public/wasm/models.json" ]; then
+  echo "WASM artifacts missing — installing..."
+  bash scripts/build-wasm.sh
 else
   echo "WASM artifacts present"
 fi

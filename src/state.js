@@ -1,4 +1,5 @@
 import { VOICES, DEFAULT_VOICE_ID } from "./voices.js";
+import { EMPTY_PROGRESS } from "./playback-progress.js";
 import {
 	DEFAULT_LANGUAGE_ID,
 	getDefaultVoiceForLanguage,
@@ -36,14 +37,13 @@ const INITIAL_STATE = {
 	siteKey: "",
 	voiceId: DEFAULT_VOICE_ID,
 	panelOpen: null,
-	pillExpanded: false,
-	totalDurationSec: 0,
-	elapsedSec: 0,
-	elapsedOffsetSec: 0,
+	// Derived from position, scope, measured rate and speed (see content.js).
+	progress: EMPTY_PROGRESS,
 	modelCached: false,
 	voiceCache: null,
 	downloadProgress: null,
 	hasPlayableContent: false,
+	pillUserHidden: false,
 };
 
 export function createState(initialPatch = {}) {
@@ -80,9 +80,9 @@ export function createState(initialPatch = {}) {
 	}
 
 	function subscribe(fn) {
-		bus.addEventListener("statechange", (e) =>
-			fn(e.detail.current, e.detail.prev),
-		);
+		const listener = (e) => fn(e.detail.current, e.detail.prev);
+		bus.addEventListener("statechange", listener);
+		return () => bus.removeEventListener("statechange", listener);
 	}
 
 	function reset() {

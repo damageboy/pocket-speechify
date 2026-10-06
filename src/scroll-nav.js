@@ -2,11 +2,22 @@ import { createRangeFromOffsets, scrollToCenter } from './dom-utils.js';
 import { chevronIcon } from './icons.js';
 import { enableAutoScroll } from './highlight.js';
 
+// Throttle with a trailing call, so the final scroll position is always checked.
 function throttle(fn, ms) {
   let last = 0;
-  return (...args) => {
-    const now = Date.now();
-    if (now - last >= ms) { last = now; fn(...args); }
+  let timer = null;
+  return () => {
+    const wait = ms - (Date.now() - last);
+    if (wait <= 0) {
+      last = Date.now();
+      fn();
+    } else if (timer === null) {
+      timer = setTimeout(() => {
+        timer = null;
+        last = Date.now();
+        fn();
+      }, wait);
+    }
   };
 }
 
@@ -77,58 +88,34 @@ export function initScrollNav(state, paragraphs) {
   document.body.appendChild(topPill);
   document.body.appendChild(bottomPill);
 
-  function getHighlightRect() {
-    const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = state.get();
-    if (pIdx === null || sIdx === null || wIdx === null) return null;
-
-    const para = paragraphs[pIdx];
+  // currentWordIndex indexes the paragraph's words, not the sentence's. It is
+  // null in the silence between words; fall back to the paragraph then.
+  function getCurrent() {
+    const { currentParagraphIndex: pIdx, currentWordIndex: wIdx } = state.get();
+    const para = pIdx === null ? null : paragraphs[pIdx];
     if (!para) return null;
+    return { para, word: wIdx === null ? null : para.words[wIdx] || null };
+  }
 
-    const sentence = para.sentences[sIdx];
-    if (!sentence) return null;
-
-    const word = sentence.words[wIdx];
-    if (!word) return null;
-
-    try {
-      // word.startOffset / word.endOffset are already absolute offsets within paragraph text
-      const wordStartOffset = word.startOffset;
-      const wordEndOffset = word.endOffset;
-      const range = createRangeFromOffsets(para.element, wordStartOffset, wordEndOffset);
-      const rect = range.getBoundingClientRect();
-      if (rect.width > 0 || rect.height > 0) return rect;
-    } catch (_) {
-      // fall back to paragraph rect
-    }
-
+  function getHighlightRect() {
+    const current = getCurrent();
+    if (!current) return null;
+    const { para, word } = current;
+    const rect = word &&
+      createRangeFromOffsets(para.element, word.startOffset, word.endOffset)?.getBoundingClientRect();
+    if (rect && (rect.width > 0 || rect.height > 0)) return rect;
     return para.element.getBoundingClientRect();
   }
 
-  function getCurrentWordText() {
-    const { currentParagraphIndex: pIdx, currentSentenceIndex: sIdx, currentWordIndex: wIdx } = state.get();
-    if (pIdx === null || sIdx === null || wIdx === null) return '';
-
-    const para = paragraphs[pIdx];
-    if (!para) return '';
-
-    const sentence = para.sentences[sIdx];
-    if (!sentence) return '';
-
-    const word = sentence.words[wIdx];
-    if (!word) return '';
-
-    return word.text || '';
-  }
-
   function updateBadgeText() {
-    const text = getCurrentWordText();
+    const text = getCurrent()?.word?.text;
+    if (!text) return; // keep the last word through silences
     topBadge.textContent = text;
     bottomBadge.textContent = text;
   }
 
   function checkVisibility() {
-    const { playback } = state.get();
-    if (playback !== 'playing') return;
+    if (state.get().playback === 'idle') return;
 
     const rect = getHighlightRect();
     if (!rect) {
@@ -185,9 +172,7 @@ export function initScrollNav(state, paragraphs) {
     ) {
       updateBadgeText();
       // Re-check visibility when word changes (highlight may have moved)
-      if (current.playback === 'playing') {
-        throttledCheck();
-      }
+      throttledCheck();
     }
   });
 }

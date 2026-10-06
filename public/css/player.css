@@ -8,11 +8,6 @@
   --bg-cta-active: #3d4ac4;
   --text-primary: #ffffff;
   --text-secondary: #9f9f9f;
-  --highlight-sentence-dark: #444766;
-  --highlight-word-dark: #5666f0;
-  --highlight-sentence-light: #e0e3ff;
-  --highlight-word-light: #abb3fe;
-  --highlight-primary: #5666f0;
   --bg-primary-dark: #121212;
   --text-tertiary: #7a7a7a;
   --accent-blue: #5c6ae5;
@@ -435,15 +430,6 @@
   border-radius: 2px;
 }
 
-.voice-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-  padding: 8px 8px 4px;
-}
-
 .voice-item {
   display: flex;
   flex-direction: row;
@@ -477,12 +463,6 @@
   color: var(--text-primary);
   background: var(--accent-blue);
   overflow: hidden;
-}
-
-.voice-avatar.large {
-  width: 64px;
-  height: 64px;
-  font-size: 24px;
 }
 
 .voice-avatar img {
@@ -709,75 +689,6 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
-/* Auto-increase toggle row */
-.speed-auto-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.speed-auto-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.speed-auto-label .title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.speed-auto-label .subtitle {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* Toggle switch */
-.toggle {
-  position: relative;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-
-.toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  background: var(--bg-divider);
-  border-radius: 11px;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.toggle input:checked + .toggle-track {
-  background: var(--bg-cta);
-}
-
-.toggle-track::before {
-  content: "";
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  left: 3px;
-  top: 3px;
-  background: var(--text-primary);
-  border-radius: 50%;
-  transition: transform 0.2s ease;
-}
-
-.toggle input:checked + .toggle-track::before {
-  transform: translateX(18px);
-}
-
 /* ============================================================
    HOVER PLAYER (paragraph play button)
    ============================================================ */
@@ -809,121 +720,9 @@
   animation: fadeOut 0.2s ease-out forwards;
 }
 
-/* Progress bar on top of hover player during playback */
-.hover-player-progress {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 3px;
-  border-radius: 4px 0 0 4px;
-  background: linear-gradient(90deg, #4759f7 52.5%, rgba(107, 120, 252, 0) 93.6%);
-  width: 0%;
-  transition: width 0.1s linear;
-}
-
-/* ============================================================
-   SCROLL-TO-HIGHLIGHT NAV WIDGET
-   ============================================================ */
-
-.scroll-nav {
-  position: fixed;
-  z-index: 2147483646;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-divider);
-  border-radius: 10px;
-  padding: 4px;
-  min-width: 60px;
-  box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.16);
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 2px;
-  font-family: system-ui, sans-serif;
-  opacity: 0;
-  transition: all 0.25s ease-out;
-  cursor: pointer;
-}
-
-.scroll-nav.visible {
-  opacity: 1;
-}
-
-.scroll-nav.top {
-  top: 16px;
-  margin-top: -30px;
-}
-
-.scroll-nav.top.visible {
-  margin-top: 0;
-}
-
-.scroll-nav.bottom {
-  bottom: 16px;
-  transform: translate(-50%, -100%);
-  margin-bottom: -30px;
-}
-
-.scroll-nav.bottom.visible {
-  margin-bottom: 0;
-}
-
-.scroll-nav:hover .scroll-nav-arrow,
-.scroll-nav:hover .scroll-nav-word {
-  opacity: 0.75;
-}
-
-.scroll-nav:active .scroll-nav-arrow,
-.scroll-nav:active .scroll-nav-word {
-  opacity: 0.5;
-}
-
-.scroll-nav-arrow {
-  width: 17px;
-  height: 17px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-primary);
-  flex-shrink: 0;
-  transition: opacity 0.1s ease;
-}
-
-.scroll-nav.top .scroll-nav-arrow {
-  transform: rotate(180deg);
-}
-
-.scroll-nav-word {
-  background: var(--highlight-primary);
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.43;
-  letter-spacing: -0.07px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  white-space: nowrap;
-  transition: opacity 0.1s ease;
-}
-
 /* ============================================================
    VOICE CACHE STATUS INDICATORS
    ============================================================ */
-
-.voice-download-indicator {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 14px;
-  height: 14px;
-  background: var(--bg-divider);
-  border-radius: 50%;
-  font-size: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-}
 
 .voice-avatar.downloading {
   opacity: 0.5;

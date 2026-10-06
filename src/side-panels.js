@@ -1,6 +1,6 @@
 import { closeIcon, searchIcon } from './icons.js';
 import { LANGUAGES, getDefaultVoiceForLanguage, getLanguage, languageFlag } from './languages.js';
-import { VOICES, getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
+import { VOICES, voiceDisplayName, getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
 
 // ============================================================
 // HELPERS
@@ -12,8 +12,8 @@ function speedLabel(speed) {
   return 'Fast';
 }
 
-function formatDurationFromSpeed(totalDurationSec) {
-  const secs = Math.max(0, Math.round(totalDurationSec));
+function formatDurationFromSpeed(totalSec) {
+  const secs = Math.max(0, Math.round(totalSec));
   const mins = Math.floor(secs / 60);
   const s = secs % 60;
   return `${mins}:${String(s).padStart(2, '0')}`;
@@ -153,7 +153,7 @@ function createSpeedPanel(state, actions) {
       btn.classList.toggle('active', Math.abs(presetValues[i] - spd) < 0.05);
     });
 
-    const dur = formatDurationFromSpeed(s.totalDurationSec);
+    const dur = formatDurationFromSpeed(s.progress.totalSec);
     durationEl.textContent = `Duration: ~${dur}`;
   }
 
@@ -166,10 +166,6 @@ function createSpeedPanel(state, actions) {
 // ============================================================
 // VOICE PANEL
 // ============================================================
-
-function voiceLanguageId(voice) {
-  return voice.lang === 'french' ? 'french_24l' : voice.lang;
-}
 
 function renderVoiceAvatar(voice) {
   const avatar = document.createElement('div');
@@ -284,11 +280,10 @@ function createVoicePanel(state, actions) {
 
   function sortedVoices(selectedLanguage) {
     const defaultVoiceId = getDefaultVoiceForLanguage(selectedLanguage);
-    return [...allVoices].sort((a, b) => {
-      const aLanguage = voiceLanguageId(a);
-      const bLanguage = voiceLanguageId(b);
-      const aRank = a.id === defaultVoiceId ? 0 : aLanguage === selectedLanguage ? 1 : 2;
-      const bRank = b.id === defaultVoiceId ? 0 : bLanguage === selectedLanguage ? 1 : 2;
+    const model = getLanguage(selectedLanguage);
+    return allVoices.filter(voice => Object.hasOwn(model.voices, voice.id)).sort((a, b) => {
+      const aRank = a.id === defaultVoiceId ? 0 : a.lang === model.language ? 1 : 2;
+      const bRank = b.id === defaultVoiceId ? 0 : b.lang === model.language ? 1 : 2;
       if (aRank !== bRank) return aRank - bRank;
       return a.name.localeCompare(b.name);
     });
@@ -301,7 +296,7 @@ function createVoicePanel(state, actions) {
     const defaultVoiceId = getDefaultVoiceForLanguage(selectedLanguage);
     const filtered = sortedVoices(selectedLanguage).filter((voice) => {
       if (!q) return true;
-      const voiceLanguage = getLanguage(voiceLanguageId(voice));
+      const voiceLanguage = getLanguage(voice.lang);
       return voice.name.toLowerCase().includes(q) ||
         voiceLanguage.description.toLowerCase().includes(q) ||
         voice.lang.toLowerCase().includes(q);
@@ -314,7 +309,7 @@ function createVoicePanel(state, actions) {
 
       const avatar = renderVoiceAvatar(voice);
 
-      const languageId = voiceLanguageId(voice);
+      const languageId = voice.lang;
       const cacheKey = state.voiceCacheKey(state.get().selectedLanguage, voice.id);
       const cacheStatus = state.get().voiceCache[cacheKey] || 'uncached';
       if (cacheStatus === 'downloading') {
@@ -331,7 +326,7 @@ function createVoicePanel(state, actions) {
       const langEl = document.createElement('div');
       langEl.className = 'voice-lang';
       const defaultLabel = voice.id === defaultVoiceId ? ' · default' : '';
-      langEl.textContent = `${languageFlag(languageId)} ${getLanguage(languageId).description}${defaultLabel}`;
+      langEl.textContent = `${languageFlag(languageId)} ${voiceDisplayName(voice.lang)}${defaultLabel}`;
 
       info.appendChild(nameEl);
       info.appendChild(langEl);
@@ -425,7 +420,7 @@ export function initSidePanels(shadow, state, actions) {
 
     // Keep speed panel in sync while it's open
     if (current.panelOpen === 'speed' &&
-        (current.speed !== prev.speed || current.totalDurationSec !== prev.totalDurationSec)) {
+        (current.speed !== prev.speed || current.progress !== prev.progress)) {
       syncSpeed(current);
     }
 

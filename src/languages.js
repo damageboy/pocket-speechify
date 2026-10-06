@@ -1,194 +1,81 @@
-export const DEFAULT_LANGUAGE_ID = "english";
+import catalog from '../public/wasm/models.json' with { type: 'json' };
 
-export const POCKET_TTS_V2_REPO = "kyutai/pocket-tts-without-voice-cloning";
-export const POCKET_TTS_V2_MODEL_REVISION =
-	"d29db7978e464fb90cb3359ee0c69a273b9142cc";
-export const POCKET_TTS_V2_VOICE_REVISION =
-	"e041936c75475d350b405bc870bcf7c22da4e9e6";
+if (catalog.schemaVersion !== 1) {
+  throw new Error(`Unsupported pocket-tts model catalog schema: ${catalog.schemaVersion}`);
+}
 
-export const LANGUAGES = [
-	{
-		id: "english",
-		description: "English (latest)",
-		defaultVoice: "alba",
-		status: "production",
-		layers: 6,
-		flag: "🇬🇧",
-		removeSemicolons: false,
-		framesAfterEos: null,
-	},
-	{
-		id: "german",
-		description: "German",
-		defaultVoice: "juergen",
-		status: "production",
-		layers: 6,
-		flag: "🇩🇪",
-		removeSemicolons: true,
-		framesAfterEos: null,
-	},
-	{
-		id: "italian",
-		description: "Italian",
-		defaultVoice: "giovanni",
-		status: "production",
-		layers: 6,
-		flag: "🇮🇹",
-		removeSemicolons: false,
-		framesAfterEos: null,
-	},
-	{
-		id: "portuguese",
-		description: "Portuguese",
-		defaultVoice: "rafael",
-		status: "production",
-		layers: 6,
-		flag: "🇧🇷",
-		removeSemicolons: false,
-		framesAfterEos: null,
-	},
-	{
-		id: "spanish",
-		description: "Spanish",
-		defaultVoice: "lola",
-		status: "production",
-		layers: 6,
-		flag: "🇪🇸",
-		removeSemicolons: false,
-		framesAfterEos: null,
-	},
-	{
-		id: "french_24l",
-		description: "French (24-layer preview)",
-		defaultVoice: "estelle",
-		status: "preview",
-		layers: 24,
-		flag: "🇫🇷",
-		removeSemicolons: true,
-		framesAfterEos: 8,
-	},
-];
+export const DEFAULT_LANGUAGE_ID = catalog.defaultModel;
 
-const LANGUAGE_BY_ID = Object.fromEntries(LANGUAGES.map((l) => [l.id, l]));
+// Presentation and browser locale mapping belong to the extension; model
+// definitions, defaults, asset URLs and configurations come from pocket-tts.
+const LOCALES = {
+  en: { language: 'english', flag: '🇬🇧' },
+  de: { language: 'german', flag: '🇩🇪' },
+  it: { language: 'italian', flag: '🇮🇹' },
+  pt: { language: 'portuguese', flag: '🇧🇷' },
+  es: { language: 'spanish', flag: '🇪🇸' },
+  fr: { language: 'french', flag: '🇫🇷' },
+  nl: { language: 'dutch', flag: '🇳🇱' },
+};
+
+export const LANGUAGES = catalog.models.map(model => ({
+  ...model,
+  flag: Object.values(LOCALES).find(locale => locale.language === model.language)?.flag || '🌍',
+}));
+
+const LANGUAGE_BY_ID = Object.fromEntries(LANGUAGES.map(model => [model.id, model]));
 
 export function getLanguage(languageId) {
-	return LANGUAGE_BY_ID[languageId] || LANGUAGE_BY_ID[DEFAULT_LANGUAGE_ID];
+  return LANGUAGE_BY_ID[languageId] || LANGUAGE_BY_ID[DEFAULT_LANGUAGE_ID];
 }
 
 export function isSupportedLanguage(languageId) {
-	return Boolean(LANGUAGE_BY_ID[languageId]);
+  return Object.hasOwn(LANGUAGE_BY_ID, languageId);
 }
 
 export function getDefaultVoiceForLanguage(languageId) {
-	return getLanguage(languageId).defaultVoice;
+  return getLanguage(languageId).defaultVoice;
 }
 
 export function languageFlag(languageId) {
-	return getLanguage(languageId).flag;
+  return getLanguage(languageId).flag;
 }
 
 export function languageFromLocale(locale) {
-	if (!locale || typeof locale !== "string") return null;
-	const normalized = locale.trim().toLowerCase().replace("_", "-");
-	const primary = normalized.split("-")[0];
-	const map = {
-		en: "english",
-		de: "german",
-		it: "italian",
-		pt: "portuguese",
-		es: "spanish",
-		fr: "french_24l",
-	};
-	return map[primary] || null;
+  if (!locale || typeof locale !== 'string') return null;
+  const primary = locale.trim().toLowerCase().replace('_', '-').split('-')[0];
+  const language = LOCALES[primary]?.language;
+  return isSupportedLanguage(language) ? language : null;
 }
 
+// Include the complete pinned URL, not just a language/path. This also versions
+// the resumable downloader's .partial and .partial-meta keys automatically.
 export function getModelCacheKey(languageId) {
-	return `languages/${getLanguage(languageId).id}/model.safetensors`;
+  return encodeURIComponent(getModelUrl(languageId));
 }
 
 export function getTokenizerCacheKey(languageId) {
-	return `languages/${getLanguage(languageId).id}/tokenizer.model`;
+  return encodeURIComponent(getTokenizerUrl(languageId));
 }
 
 export function getVoiceCacheKey(languageId, voiceId) {
-	return `languages/${getLanguage(languageId).id}/embeddings/${voiceId}.safetensors`;
-}
-
-function hfUrl(revision, path) {
-	return `https://huggingface.co/${POCKET_TTS_V2_REPO}/resolve/${revision}/${path}`;
+  return encodeURIComponent(getVoiceUrl(languageId, voiceId));
 }
 
 export function getModelUrl(languageId) {
-	return hfUrl(POCKET_TTS_V2_MODEL_REVISION, getModelCacheKey(languageId));
+  return getLanguage(languageId).weightsUrl;
 }
 
 export function getTokenizerUrl(languageId) {
-	return hfUrl(POCKET_TTS_V2_MODEL_REVISION, getTokenizerCacheKey(languageId));
+  return getLanguage(languageId).tokenizerUrl;
 }
 
 export function getVoiceUrl(languageId, voiceId) {
-	return hfUrl(
-		POCKET_TTS_V2_VOICE_REVISION,
-		getVoiceCacheKey(languageId, voiceId),
-	);
+  const url = getLanguage(languageId).voices[voiceId];
+  if (!url) throw new Error(`Voice ${voiceId} is unavailable for model ${languageId}`);
+  return url;
 }
 
 export function buildLanguageConfigYaml(languageId) {
-	const lang = getLanguage(languageId);
-	let header = "";
-	if (lang.removeSemicolons) header += "remove_semicolons: true\n";
-	if (lang.framesAfterEos !== null)
-		header += `model_recommended_frames_after_eos: ${lang.framesAfterEos}\n`;
-
-	return `${header}
-flow_lm:
-  insert_bos_before_voice: true
-  dtype: float32
-  flow:
-    depth: 6
-    dim: 512
-  transformer:
-    d_model: 1024
-    hidden_scale: 4
-    max_period: 10000
-    num_heads: 16
-    num_layers: ${lang.layers}
-  lookup_table:
-    dim: 1024
-    n_bins: 4000
-    tokenizer: sentencepiece
-    tokenizer_path: dummy
-
-mimi:
-  dtype: float32
-  sample_rate: 24000
-  inner_dim: 32
-  outer_dim: 512
-  channels: 1
-  frame_rate: 12.5
-  seanet:
-    dimension: 512
-    channels: 1
-    n_filters: 64
-    n_residual_layers: 1
-    ratios: [6, 5, 4]
-    kernel_size: 7
-    residual_kernel_size: 3
-    last_kernel_size: 3
-    dilation_base: 2
-    pad_mode: constant
-    compress: 2
-  transformer:
-    d_model: 512
-    num_heads: 8
-    num_layers: 2
-    layer_scale: 0.01
-    context: 250
-    dim_feedforward: 2048
-    input_dimension: 512
-    output_dimensions: [512]
-  quantizer:
-    dimension: 32
-    output_dimension: 512
-`;
+  return getLanguage(languageId).configYaml;
 }

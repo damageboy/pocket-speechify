@@ -22,9 +22,7 @@ describe("createState", () => {
 		expect(s.currentSentenceIndex).toBeNull();
 		expect(s.currentWordIndex).toBeNull();
 		expect(s.panelOpen).toBeNull();
-		expect(s.pillExpanded).toBe(false);
-		expect(s.totalDurationSec).toBe(0);
-		expect(s.elapsedSec).toBe(0);
+		expect(s.progress).toEqual({ totalSec: 0, remainingSec: 0, percent: 0 });
 		expect(s.modelCached).toBe(false);
 		expect(s.downloadProgress).toBeNull();
 		expect(s.selectedLanguage).toBe(DEFAULT_LANGUAGE_ID);

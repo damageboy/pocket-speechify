@@ -1,6 +1,7 @@
 export default defineBackground(() => {
   let offscreenCreating = null;
-  let activeTabId = null;
+  // Preserve command order even when offscreen discovery/creation is asynchronous.
+  let forwarding = Promise.resolve();
 
   async function ensureOffscreenDocument() {
     const existingContexts = await chrome.runtime.getContexts({
@@ -18,13 +19,17 @@ export default defineBackground(() => {
       reasons: ['AUDIO_PLAYBACK', 'WORKERS'],
       justification: 'TTS audio playback, WASM inference, and model download',
     });
-    await offscreenCreating;
-    offscreenCreating = null;
+    try {
+      await offscreenCreating;
+    } finally {
+      // Reset on failure too, so the next request retries creation.
+      offscreenCreating = null;
+    }
   }
 
   const lastLoggedBucket = new Map();
 
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, sender) => {
     if (!msg || !msg.type) return;
 
     // --- Messages FROM content scripts (have sender.tab) ---
@@ -32,7 +37,7 @@ export default defineBackground(() => {
       console.log('[SW] From content script:', msg.type, msg);
       // TTS control messages: forward to offscreen document
       if (msg.type.startsWith('tts-')) {
-        handleTTSFromContent(msg, sender.tab.id);
+        forwarding = forwarding.then(() => handleTTSFromContent(msg, sender.tab.id));
       }
       return;
     }
@@ -51,23 +56,15 @@ export default defineBackground(() => {
           const languageLabel = msg.language ? `${msg.language}:` : '';
           console.log(`[SW] Download ${languageLabel}${msg.asset}${msg.voiceId ? ':' + msg.voiceId : ''}: ${msg.percent}%`);
         }
-      } else if (msg.type === 'tts-elapsed') {
-        console.debug('[SW] From offscreen:', msg.type);
       } else {
         console.log('[SW] From offscreen:', msg.type, msg);
       }
       // Forward events only to the tab that initiated playback
       if (msg.type === 'download-progress' || msg.type === 'download-complete' ||
           msg.type === 'tts-word' || msg.type === 'tts-sentence-event' ||
-          msg.type === 'tts-paragraph-done' || msg.type === 'tts-elapsed') {
-        sendToActiveTab(msg);
+          msg.type === 'tts-paragraph-done' || msg.type === 'tts-superseded') {
+        sendToOwner(msg);
       }
-      return;
-    }
-
-    // --- Debug: relay service worker logs to content script ---
-    if (msg.type === 'get-sw-status') {
-      sendResponse({ status: 'alive', offscreenCreating: !!offscreenCreating, activeTabId });
       return;
     }
 
@@ -76,35 +73,31 @@ export default defineBackground(() => {
 
   async function handleTTSFromContent(msg, tabId) {
     try {
-      if (msg.type === 'tts-play-paragraph') {
-        activeTabId = tabId;
-      }
-
       console.log('[SW] Ensuring offscreen document...');
       await ensureOffscreenDocument();
       console.log('[SW] Offscreen ready. Forwarding:', msg.type);
       // Forward to offscreen doc with source tag + tab ID so it knows origin
-      chrome.runtime.sendMessage({ ...msg, source: 'service-worker', tabId });
+      await chrome.runtime.sendMessage({ ...msg, source: 'service-worker', tabId });
       console.log('[SW] Message forwarded to offscreen');
     } catch (err) {
       console.error('[SW] handleTTSFromContent error:', err);
+      if (msg.type === 'tts-play-paragraph') {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'tts-paragraph-done', sessionId: msg.sessionId, genId: msg.genId, error: String(err), fatal: true,
+        }).catch(() => {});
+      }
     }
   }
 
-  function sendToActiveTab(msg) {
-    if (activeTabId === null) return;
+  function sendToOwner(msg) {
+    if (msg.tabId == null) return;
     const { source, ...payload } = msg;
-    chrome.tabs.sendMessage(activeTabId, payload).catch(() => {});
+    chrome.tabs.sendMessage(msg.tabId, payload).catch(() => {});
   }
 
   // Toolbar button click: toggle pill player visibility on the active tab
   chrome.action.onClicked.addListener((tab) => {
     console.log('[SW] Toolbar button clicked, toggling pill on tab', tab.id);
     chrome.tabs.sendMessage(tab.id, { type: 'toggle-pill' }).catch(() => {});
-  });
-
-  // Startup: placeholder for future startup logic
-  chrome.runtime.onInstalled.addListener(() => {
-    // Cache verification happens lazily on first play
   });
 });

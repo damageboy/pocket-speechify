@@ -20,8 +20,8 @@ import {
 	hasBundledVoiceAvatar,
 } from "../src/voices.js";
 
-const MODEL_REV = "d29db7978e464fb90cb3359ee0c69a273b9142cc";
-const VOICE_REV = "e041936c75475d350b405bc870bcf7c22da4e9e6";
+const MODEL_REV = "4e1e0a3e611c51c0b4ed8174fc10f32a54644303";
+const VOICE_REV = "4e1e0a3e611c51c0b4ed8174fc10f32a54644303";
 
 describe("language catalog", () => {
 	it("uses English as the fallback language", () => {
@@ -35,8 +35,9 @@ describe("language catalog", () => {
 		expect(languageFromLocale("it")).toBe("italian");
 		expect(languageFromLocale("pt-BR")).toBe("portuguese");
 		expect(languageFromLocale("es-ES")).toBe("spanish");
-		expect(languageFromLocale("fr-FR")).toBe("french_24l");
-		expect(languageFromLocale("nl-NL")).toBe(null);
+		expect(languageFromLocale("fr-FR")).toBe("french");
+		expect(languageFromLocale("nl-NL")).toBe("dutch");
+		expect(languageFromLocale("ja-JP")).toBe(null);
 	});
 
 	it("exposes language defaults and flags", () => {
@@ -44,46 +45,49 @@ describe("language catalog", () => {
 		expect(languageFlag("spanish")).toBe("🇪🇸");
 	});
 
-	it("builds v2 cache keys by language", () => {
-		expect(getModelCacheKey("german")).toBe(
-			"languages/german/model.safetensors",
+	it("builds cache keys from complete pinned asset URLs", () => {
+		expect(decodeURIComponent(getModelCacheKey("german"))).toBe(
+			`https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/${MODEL_REV}/languages/german/model.safetensors`,
 		);
-		expect(getTokenizerCacheKey("german")).toBe(
-			"languages/german/tokenizer.model",
+		expect(decodeURIComponent(getTokenizerCacheKey("german"))).toBe(
+			`https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/${MODEL_REV}/languages/german/tokenizer.json`,
 		);
-		expect(getVoiceCacheKey("german", "juergen")).toBe(
-			"languages/german/embeddings/juergen.safetensors",
+		expect(decodeURIComponent(getVoiceCacheKey("german", "juergen"))).toBe(
+			`https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/${VOICE_REV}/languages/german/embeddings/juergen.safetensors`,
 		);
 	});
 
-	it("builds v2 Hugging Face URLs by language and revision", () => {
+	it("uses upstream Hugging Face URLs by model and revision", () => {
 		expect(getModelUrl("german")).toContain(
 			`/resolve/${MODEL_REV}/languages/german/model.safetensors`,
 		);
 		expect(getTokenizerUrl("german")).toContain(
-			`/resolve/${MODEL_REV}/languages/german/tokenizer.model`,
+			`/resolve/${MODEL_REV}/languages/german/tokenizer.json`,
 		);
 		expect(getVoiceUrl("german", "juergen")).toContain(
 			`/resolve/${VOICE_REV}/languages/german/embeddings/juergen.safetensors`,
 		);
 	});
 
-	it("generates language-specific config yaml", () => {
+	it("preserves upstream config options including legacy architectures", () => {
 		const germanYaml = buildLanguageConfigYaml("german");
 		expect(germanYaml).toContain("remove_semicolons: true");
 		expect(germanYaml).toContain("num_layers: 6");
 
 		const frenchYaml = buildLanguageConfigYaml("french_24l");
-		expect(frenchYaml).toContain("model_recommended_frames_after_eos: 8");
 		expect(frenchYaml).toContain("num_layers: 24");
+		expect(buildLanguageConfigYaml("english_2026-01")).toContain("insert_bos_before_voice: false");
+		expect(getTokenizerUrl("english_2026-01")).toMatch(/\/resolve\/[^/]+\/tokenizer\.json$/);
+		expect(getVoiceUrl("english_2026-09_24l", "alba")).toContain("/languages/english_2026-09_24l/embeddings/alba.safetensors");
 	});
 });
 
 describe("voice catalog", () => {
-	it("contains v2 voices and metadata", () => {
+	it("contains upstream voices and metadata", () => {
 		expect(VOICES.length).toBeGreaterThanOrEqual(26);
 		expect(getVoice("juergen")).toMatchObject({ lang: "german", gender: "m" });
 		expect(getVoice("estelle")).toMatchObject({ lang: "french", gender: "f" });
+		expect(getVoice("daan")).toMatchObject({ lang: "dutch", gender: "m" });
 	});
 
 	it("formats voice ids and knows bundled avatars", () => {

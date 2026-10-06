@@ -1,4 +1,5 @@
 import { hoverPlayIcon } from "./icons.js";
+import { findParagraphIndex } from "./playback-plan.js";
 
 export function initHoverPlayer(shadow, state, paragraphs, actions) {
 	const btn = document.createElement("button");
@@ -14,7 +15,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 
 	shadow.appendChild(btn);
 
-	let currentParagraphIndex = -1;
+	let currentParagraph = null;
 	let fadeOutTimer = null;
 	let hideDelayTimer = null;
 	let isOverButton = false;
@@ -29,7 +30,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 			hideDelayTimer = null;
 		}
 
-		currentParagraphIndex = index;
+		currentParagraph = paragraphs[index];
 
 		const rect = element.getBoundingClientRect();
 		btn.style.left = `${rect.left - 36}px`;
@@ -123,10 +124,9 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 	// Click: jump to paragraph — works in any playback state
 	btn.addEventListener("click", () => {
 		console.log("[Pocket Speechify] Hover play button clicked");
-		if (currentParagraphIndex >= 0) {
-			hideImmediate();
-			actions.play(currentParagraphIndex);
-		}
+		const index = findParagraphIndex(paragraphs, currentParagraph);
+		hideImmediate();
+		if (index >= 0) actions.play(index);
 	});
 
 	// On scroll: dismiss immediately

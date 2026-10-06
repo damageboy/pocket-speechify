@@ -4,16 +4,16 @@
 [![Latest Release](https://img.shields.io/github/v/release/damageboy/pocket-speechify?label=release)](https://github.com/damageboy/pocket-speechify/releases/latest)
 [![Download .crx](https://img.shields.io/github/downloads/damageboy/pocket-speechify/total?label=downloads)](https://github.com/damageboy/pocket-speechify/releases/latest)
 
-A lightweight Chrome extension that replicates the Speechify text-to-speech UI — floating pill player, word highlighting, and voice selection — powered by the multilingual pocket-tts v2.1.0 WASM model running entirely in your browser.
+A lightweight Chrome extension that replicates the Speechify text-to-speech UI — floating pill player, word highlighting, and voice selection — powered by a prebuilt pocket-tts v3.3.0-based WASM engine running entirely in your browser.
 
 ---
 
 ## Features
 
 - **Floating pill player** — fixed to the right edge of any page, draggable, collapses when not in use
-- **Word-level highlighting** — sentence and word highlights track playback in real time
+- **Timestamp-based word highlighting** — pocket-tts word-start/end events follow the audio playback clock, including pauses and speed changes; no estimated word timings
 - **Pitch-preserving speed control** — 0.4x to 4.5x via [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) WASM; pitch stays natural at any speed
-- **Multilingual pocket-tts v2.1.0 support** — English, German, Italian, Portuguese, Spanish, and French preview voices
+- **Upstream model catalog** — English, German, Italian, Portuguese, Spanish, French, and Dutch, including dated English releases and 24-layer variants
 - **Automatic language detection** — reads page metadata (`lang`, `og:locale`, and language meta tags) and supports saved domain language overrides
 - **Hover-to-play** — hover over any paragraph to start reading from there
 - **Scroll-to-highlight** — floating nav pill snaps you back to the word being read
@@ -41,14 +41,16 @@ git clone https://github.com/damageboy/pocket-speechify.git
 cd pocket-speechify
 ```
 
-Pocket-tts WASM artifacts are generated into `public/wasm/` and are not checked into git. They are built on demand if missing:
+Pocket-tts WASM binaries are downloaded into `public/wasm/` and are not checked into git. A generated upstream `models.json` snapshot is vendored alongside them and refreshed from the same release package on installation. Missing artifacts are installed on demand without a Rust toolchain or GitHub account:
 
 ```bash
-# Requires Rust + wasm-pack
+# Requires Node.js, curl, tar, and shasum
+npm ci
 npm run build:wasm
+npm run build
 ```
 
-Then load the directory as an unpacked extension.
+Then load `.output/chrome-mv3/` as an unpacked extension. After updating the WASM pin in an existing checkout, run `npm run build:wasm` explicitly to replace the cached JS, WASM, and catalog together before rebuilding.
 
 ---
 
@@ -56,9 +58,11 @@ Then load the directory as an unpacked extension.
 
 1. Navigate to any article or page with readable text
 2. The pill player appears on the right edge — click **▶** to start reading
-3. The extension reads the page paragraph by paragraph, highlighting the current sentence and word
-4. On first use for a language, the model and tokenizer download automatically (around 100MB per language)
-5. Voices download on first selection and are cached with the per-language model/tokenizer assets via the Cache API
+3. The extension reads the page paragraph by paragraph, highlighting the current paragraph and word with native DOM ranges that follow layout and scrolling
+4. On first use for a model, its weights and tokenizer download automatically; larger 24-layer models require more download space and memory
+5. Voices download on first selection and are cached with the model/tokenizer assets via the Cache API. An upstream asset revision triggers a fresh download rather than reusing incompatible cached bytes
+
+Page content refreshes as the DOM changes. Playback keeps its original queue through insertions; editing, removing, or reordering remaining queued text stops playback rather than highlighting unrelated text. Start again to read the updated content. Starting playback in another tab supersedes the previous tab.
 
 ### Controls
 
@@ -116,6 +120,14 @@ flowchart LR
 
 Speed changes are pitch-preserving. The offscreen document uses [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) in direct WASM mode — each audio chunk is time-stretched to `outputLen = inputLen / speed` samples via the STFT engine, then scheduled for playback at 1.0x. Pitch is preserved by the algorithm itself, not by pitch-shifting compensation.
 
+### Word timestamps
+
+The worker uses `start_stream_with_timestamps()` and `next_batch()` for models with calibrated `timestamp_heads`. The offscreen document maps native source-audio timestamps through each scheduled chunk's stretch ratio and the stretcher's input/output latency. It processes metadata-only final batches and waits for all queued audio, including the flushed tail, before advancing paragraphs.
+
+Original page text goes directly to pocket-tts; the extension no longer applies separate English abbreviation/number expansion or guesses normalized-to-page word indices. Lexical indices and spelling are matched against page words. Native boundaries are approximate (about 80 ms); ambiguous or unspoken words remain unhighlighted.
+
+All six English variants plus Dutch, German, Portuguese, and Spanish **24-layer** models currently support timestamps. Other catalog models retain audio playback without word highlighting. The duration/progress display still estimates unread audio; those estimates do not drive highlighting.
+
 ---
 
 ## Development
@@ -133,36 +145,42 @@ pre-commit install
 
 | Script                     | Purpose                                    |
 | -------------------------- | ------------------------------------------ |
-| `scripts/build-wasm.sh`    | Build pocket-tts WASM from source          |
+| `scripts/build-wasm.sh`    | Download pinned WASM (or build a source override) |
 | `scripts/verify-build.sh`  | Check all required files are present       |
 | `scripts/stamp-version.sh` | Stamp `manifest.json` version from git tag |
 | `scripts/package.sh`       | Create `.zip` for Chrome Web Store         |
 
-#### Building WASM from a local pocket-tts checkout
+#### Prebuilt WASM and source overrides
 
-By default `build-wasm.sh` clones `damageboy/pocket-tts`, the pocket-tts v2.1.0 multilingual fork, from GitHub into a temp directory and checks out a pinned `POCKET_TTS_REF`. `npm run build`, `npm run zip`, and `scripts/verify-build.sh` reuse existing `public/wasm/` artifacts and only run `build-wasm.sh` when they are missing.
+By default `build-wasm.sh` downloads `pocket-tts-v3.3.0-wasm-web.tar.gz` from the republished public [v3.3.0 release](https://github.com/damageboy/pocket-tts/releases/tag/v3.3.0), built from [commit 1e0500d](https://github.com/damageboy/pocket-tts/commit/1e0500de641338ba2c87f609ff47f7a10006f60f). It verifies the pinned SHA-256 checksum and catalog schema before installing `pocket_tts.js`, `pocket_tts_bg.wasm`, and `models.json` together. This is a release asset, not an expiring Actions artifact; no authentication is required. Download, checksum, or catalog validation failures stop the build before replacing the installed files rather than silently switching source versions.
 
-Override the source when needed:
+The catalog is generated upstream from pocket-tts's model definitions, original YAML configs, and voice metadata. The extension consumes its model choices, default voices, and pinned Hugging Face URLs without maintaining another model list. It currently supplies 18 models and 27 voices; the default English model uses the September 2026 weights and JSON tokenizer. The extension does not fetch a changing catalog at runtime, so offline use and engine/config compatibility are preserved.
+
+**Catalog packaging:** every release installation takes the catalog from the same archive as the engine. Future package upgrades therefore bring their matching model list automatically. Do not edit the generated snapshot by hand.
+
+`npm run build`, `npm run package`, and `scripts/verify-build.sh` reuse existing `public/wasm/` artifacts and invoke the installer when any of the three files is missing.
+
+Source builds remain available with Bun, Rust, and wasm-pack. They generate the catalog from that checkout, which must include the upstream catalog generator:
 
 ```bash
 # Build from a local checkout instead of cloning. The checkout is read-only.
 POCKET_TTS_DIR=~/projects/pocket-tts npm run build:wasm
 
-# Build from a different remote ref. Defaults are damageboy/pocket-tts + the pinned known-good commit.
-POCKET_TTS_REF=d5159887defad3ac9694433c6c1047c065869b1d npm run build:wasm
+# Build the exact source revision used by the republished v3.3.0 release.
+POCKET_TTS_REF=1e0500de641338ba2c87f609ff47f7a10006f60f npm run build:wasm
 ```
 
 `POCKET_TTS_REPO` remains supported as a backwards-compatible alias for `POCKET_TTS_DIR`. The local repo is **never modified** — only read from. The temp staging directory for WASM artifacts is still created and cleaned up as usual.
 
 ### CI
 
-Every push to `master` runs the build workflow and uploads a build artifact. CI starts from a fresh checkout where generated WASM artifacts are absent, so it builds pocket-tts WASM before packaging. Tagged pushes (`v*`) additionally create a GitHub Release with `.zip` and `.crx` attachments.
+Every push to `master` runs the build workflow and uploads a build artifact. CI downloads and verifies the public pinned WASM release before packaging; neither Rust nor a download token is required. Tagged pushes (`v*`) additionally create a GitHub Release with `.zip` and `.crx` attachments.
 
 ---
 
 ## Credits
 
 - [Kyutai](https://kyutai.org/) — original [pocket-tts](https://huggingface.co/kyutai/pocket-tts-without-voice-cloning) WASM TTS model
-- [damageboy/pocket-tts](https://github.com/damageboy/pocket-tts) — pocket-tts v2.1.0 multilingual fork used by the extension build
+- [damageboy/pocket-tts](https://github.com/damageboy/pocket-tts) — multilingual Rust engine and prebuilt WASM package
 - [Signalsmith Audio](https://signalsmith-audio.co.uk/) — [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) pitch-preserving time stretching
 - [Speechify](https://speechify.com/) — UI/UX reference

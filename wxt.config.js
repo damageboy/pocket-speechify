@@ -4,15 +4,19 @@ import { existsSync } from 'fs';
 
 function computeVersion() {
   try {
-    const tag = execSync('git describe --tags --abbrev=0', { encoding: 'utf8' }).trim();
+    const description = execSync('git describe --tags --long', { encoding: 'utf8' }).trim();
+    const [, tag, distance, hash] = description.match(/^(.*)-(\d+)-g([a-f\d]+)$/);
     const base = tag.replace(/^v/, '');
     const parts = base.split('.');
-    parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1);
+    if (Number(distance) > 0) {
+      parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1);
+    }
     const numeric = parts.join('.');
 
     const isDirty = execSync('git status --porcelain', { encoding: 'utf8' }).trim().length > 0;
-    const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
-    const full = isDirty ? `${numeric}-${hash}-dirty` : `${numeric}-${hash}`;
+    const full = distance === '0' && !isDirty
+      ? numeric
+      : `${numeric}-${hash}${isDirty ? '-dirty' : ''}`;
 
     return { numeric, full };
   } catch {
@@ -59,7 +63,7 @@ export default defineConfig({
       {
         name: 'pocket-tts-wasm-build',
         async buildStart() {
-          if (!existsSync('public/wasm/pocket_tts_bg.wasm')) {
+          if (['pocket_tts_bg.wasm', 'pocket_tts.js', 'models.json'].some(file => !existsSync(`public/wasm/${file}`))) {
             console.log('[wxt] WASM artifacts missing, running build-wasm.sh...');
             execSync('bash scripts/build-wasm.sh', { stdio: 'inherit' });
           }

@@ -90,9 +90,22 @@ export async function createStretchProcessor(ModuleFactory, sampleRate, channels
     wasmModule._presetDefault(channels, sampleRate);
   }
 
+  function flush(speed) {
+    // Supply the input lookahead, then drain the output delay line. Keep the
+    // segments separate so playback can map timestamps through both phases.
+    const padding = process(new Float32Array(inputLatency), speed);
+    ensureBuffers(outputLatency);
+    wasmModule._flush(outputLatency);
+    const tail = new Float32Array(wasmModule.HEAP8.buffer, buffersOut[0], outputLatency).slice();
+    return [
+      { data: padding, inputSamples: inputLatency },
+      { data: tail, inputSamples: 0 },
+    ];
+  }
+
   function destroy() {
     // WASM instance is GC'd with the closure — no explicit cleanup needed
   }
 
-  return { process, reset, destroy };
+  return { process, reset, flush, destroy, inputLatency, outputLatency };
 }
