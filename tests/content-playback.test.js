@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // highlighting remain real. Audio messages stand in for the extension host.
 const ui = vi.hoisted(() => ({}));
 vi.mock('../src/pill-player.js', () => ({
-  initPillPlayer: async (shadow, state, actions) => Object.assign(ui, { state, actions }),
+  initPillPlayer: async (shadow, state, actions, paragraphs, history) => Object.assign(ui, { state, actions, history }),
 }));
 vi.mock('../src/side-panels.js', () => ({ initSidePanels() {} }));
 vi.mock('wxt/browser', () => ({ get browser() { return globalThis.chrome; } }));
@@ -47,6 +47,18 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
+});
+
+it('records only processed engine submissions, not original sentences or stale generations', () => {
+  ui.actions.play();
+  const owner = request();
+  deliver('tts-sentence-event', { paragraphIndex: 0, sentenceIndex: 0 });
+  expect(ui.history).toEqual([]);
+  deliver('tts-processed-text', { paragraphIndex: 0, text: 'Processed engine text.' });
+  expect(ui.history).toEqual([{ paragraphIndex: 0, text: 'Processed engine text.' }]);
+  ui.actions.stop();
+  deliver('tts-processed-text', { paragraphIndex: 1, text: 'Stale text.' }, owner);
+  expect(ui.history).toHaveLength(1);
 });
 
 it('keeps a paused position and progress when content is inserted before it', async () => {

@@ -144,7 +144,7 @@ describe("initPillPlayer", () => {
 		const { shadow } = await renderPill();
 		shadow.querySelector('button[aria-label="Settings"]').click();
 		const sections = [...shadow.querySelectorAll('.settings-nav-item')];
-		expect(sections.map(button => button.textContent)).toEqual(['General', 'Debug', 'History']);
+		expect(sections.map(button => button.textContent)).toEqual(['General', 'Text rules', 'Debug', 'History']);
 		for (const section of sections) {
 			section.click();
 			expect(shadow.querySelector('.settings-content-body').textContent.trim()).not.toBe('');

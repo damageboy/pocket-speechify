@@ -3,15 +3,16 @@
 // normalization must not highlight a different word on the page.
 const WORD = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*(?:[-‐‑'’][\p{L}\p{N}][\p{L}\p{N}\p{M}]*)*/gu;
 
-export function createWordTimeline(text, wordOffset = 0, { inputLatency = 0, outputLatency = 0 } = {}) {
+export function createWordTimeline(text, wordOffset = 0, { inputLatency = 0, outputLatency = 0, processed } = {}) {
   const pageWords = [...text.matchAll(/\S+/g)];
+  const pageIndices = new Array(text.length).fill(null);
+  pageWords.forEach((match, index) => pageIndices.fill(wordOffset + index, match.index, match.index + match[0].length));
   // Streaming strips explicit pauses. Mask with equal-length spaces so the
   // lexical sequence matches upstream while DOM offsets remain unchanged.
-  const source = text.replace(/\[pause:\d+(?:\.\d+)?(?:ms|s)\]/g, marker => ' '.repeat(marker.length));
-  let pageIndex = 0;
+  const source = (processed?.text ?? text).replace(/\[pause:\d+(?:\.\d+)?(?:ms|s)\]/g, marker => ' '.repeat(marker.length));
   const words = [...source.matchAll(WORD)].map(match => {
-    while (pageIndex + 1 < pageWords.length && pageWords[pageIndex + 1].index <= match.index) pageIndex++;
-    return { word: match[0], wordIndex: wordOffset + pageIndex };
+    const offset = processed ? processed.sourceOffsets[match.index] : match.index;
+    return { word: match[0], wordIndex: offset == null ? null : pageIndices[offset] };
   });
   const timings = new Map();
   const audio = [];
@@ -47,7 +48,7 @@ export function createWordTimeline(text, wordOffset = 0, { inputLatency = 0, out
       }
       if (!latest || (latest.kind === 'word_end' && time >= latest.end_time)) return null;
       const word = words[latest.word_index];
-      return word?.word === latest.word ? word : null;
+      return word?.word === latest.word && word.wordIndex != null ? word : null;
     },
   };
 }

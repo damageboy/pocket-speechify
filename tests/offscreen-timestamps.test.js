@@ -19,7 +19,7 @@ beforeEach(async () => {
   messages = [];
   workers = [];
   contexts = [];
-  vi.stubGlobal('browser', { runtime: {
+  vi.stubGlobal('browser', { storage: { local: { get: vi.fn(async () => ({})) } }, runtime: {
     onMessage: { addListener: fn => { receive = fn; } },
     sendMessage: msg => { messages.push(msg); },
     getURL: () => 'data:text/javascript,export default function(){}',
@@ -71,6 +71,39 @@ async function play(overrides = {}) {
 }
 
 const wordMessages = () => messages.filter(m => m.type === 'tts-word');
+
+it('submits and reports processed text after seeking, retaining original highlight indices', async () => {
+  browser.storage.local.get.mockResolvedValue({ 'pocket-speechify-text-rules': [
+    { name: 'Title', pattern: 'Dr\\.', replacement: 'Medical doctor', flags: 'g', enabled: true },
+    { name: 'Citation', pattern: '\\[12\\] ', replacement: '', flags: 'g', enabled: true },
+  ] });
+  const { request, worker, genId, ctx } = await play({ paragraphText: 'Skip this. Dr. Ada [12] arrived.' });
+  expect(request.text).toBe('Medical doctor Ada arrived.');
+  expect(messages.find(m => m.type === 'tts-processed-text')).toMatchObject({
+    tabId: 9, sessionId: 'A', genId: 7,
+    detail: { paragraphIndex: 2, text: 'Medical doctor Ada arrived.' },
+  });
+  worker.emit({ type: 'words', genId, events: [
+    { kind: 'word_start', word: 'arrived', word_index: 3, start_time: 0.4 },
+  ] });
+  worker.emit({ type: 'chunk', genId, data: new Float32Array(24000) });
+  await vi.advanceTimersByTimeAsync(25);
+  ctx.currentTime = 10.5;
+  await vi.advanceTimersByTimeAsync(25);
+  expect(wordMessages().at(-1).detail.wordIndex).toBe(5);
+});
+
+it('skips fully removed paragraphs without sending blank text to WASM or recording a submission', async () => {
+  browser.storage.local.get.mockResolvedValue({ 'pocket-speechify-text-rules': [
+    { name: 'Remove', pattern: '[\\s\\S]+', replacement: '', flags: 'g', enabled: true },
+  ] });
+  receive({ source: 'service-worker', type: 'tts-play-paragraph', genId: 7, tabId: 9, sessionId: 'A',
+    startPlayback: true, paragraphText: 'Remove me.', speed: 1 });
+  await vi.advanceTimersByTimeAsync(25);
+  expect(workers.flatMap(worker => worker.sent).some(m => m.type === 'generate')).toBe(false);
+  expect(messages.some(m => m.type === 'tts-processed-text')).toBe(false);
+  expect(messages.find(m => m.type === 'tts-paragraph-done')).toMatchObject({ sourceSec: 0, genId: 7 });
+});
 
 it('uses original text and exact seek offsets, and resumes each new paragraph audio context', async () => {
   const first = await play();
@@ -259,6 +292,22 @@ it('rejects a late old paragraph continuation without reclaiming the new owner',
   expect(contexts).toHaveLength(count);
   expect(next.ctx.state).toBe('running');
   expect(next.worker.sent.findLast(m => m.type === 'generate').genId).toBe(next.genId);
+});
+
+it.each(['tts-pause', 'tts-cancel'])('honors %s while rules are loading', async type => {
+  let loaded;
+  browser.storage.local.get.mockReturnValueOnce(new Promise(resolve => { loaded = resolve; }));
+  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9,
+    sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello.',
+    paragraphIndex: 0, startSentenceIndex: 0, sentenceWordOffsets: [0], speed: 1 });
+  receive({ source: 'service-worker', type, tabId: 9, sessionId: 'A', genId: 7 });
+  loaded({});
+  await vi.advanceTimersByTimeAsync(25);
+  if (type === 'tts-pause') expect(contexts.at(-1).state).toBe('suspended');
+  else {
+    expect(workers).toHaveLength(0);
+    expect(messages.some(m => m.type === 'tts-processed-text')).toBe(false);
+  }
 });
 
 it.each(['tts-pause', 'tts-cancel'])('honors %s while the first play is awaiting model download', async type => {

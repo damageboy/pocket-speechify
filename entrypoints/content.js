@@ -217,17 +217,16 @@ export default defineContentScript({
 		});
 
 		tts.addEventListener("sentence", (e) => {
-			const { paragraphIndex, sentenceIndex, text } = e.detail;
+			state.dispatch({ currentSentenceIndex: e.detail.sentenceIndex });
+		});
+
+		tts.addEventListener("processed-text", (e) => {
+			const { paragraphIndex, text } = e.detail;
 			const globalParagraphIndex = realParagraphIndex(paragraphIndex);
-			state.dispatch({ currentSentenceIndex: sentenceIndex });
 			if (globalParagraphIndex === null) return;
 			ttsHistory.push({
-				text:
-					text ||
-					paragraphs[globalParagraphIndex]?.sentences[sentenceIndex]?.text ||
-					"",
+				text,
 				paragraphIndex: globalParagraphIndex,
-				sentenceIndex,
 			});
 		});
 

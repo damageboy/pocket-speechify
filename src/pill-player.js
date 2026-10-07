@@ -19,6 +19,7 @@ import {
 	avatarColor,
 } from "./voices.js";
 import { languageFlag } from "./languages.js";
+import { renderTextRulesSettings } from "./text-rules-settings.js";
 
 function formatDuration(remainingSec) {
 	const remaining = Math.max(0, Math.ceil(remainingSec));
@@ -396,10 +397,12 @@ export async function initPillPlayer(
 
 		const sections = [
 			{ key: "General", icon: navGeneralIcon },
+			{ key: "Text rules", icon: navHistoryIcon },
 			{ key: "Debug", icon: navDebugIcon },
 			{ key: "History", icon: navHistoryIcon },
 		];
 		let active = "General";
+		let textRulesPane;
 
 		const dialog = document.createElement("div");
 		dialog.className = "settings-dialog";
@@ -421,6 +424,7 @@ export async function initPillPlayer(
 
 		const closeBtn = document.createElement("button");
 		closeBtn.className = "settings-dialog-close";
+		closeBtn.setAttribute("aria-label", "Close settings");
 		const closeIcEl = closeIcon();
 		closeIcEl.style.cssText = "width: 14px; height: 14px;";
 		closeBtn.appendChild(closeIcEl);
@@ -441,6 +445,7 @@ export async function initPillPlayer(
 
 		function renderContent() {
 			contentBody.replaceChildren();
+			dialog.classList.toggle("settings-dialog-text-rules", active === "Text rules");
 			if (active === "General") {
 				const row = document.createElement("div");
 				row.className = "settings-field-row";
@@ -473,6 +478,12 @@ export async function initPillPlayer(
 				row.appendChild(labelRow);
 				row.appendChild(slider);
 				contentBody.appendChild(row);
+			} else if (active === "Text rules") {
+				if (!textRulesPane) {
+					textRulesPane = document.createElement("div");
+					renderTextRulesSettings(textRulesPane);
+				}
+				contentBody.appendChild(textRulesPane);
 			} else if (active === "Debug") {
 				const desc = document.createElement("p");
 				desc.className = "settings-field-desc";
@@ -510,6 +521,10 @@ export async function initPillPlayer(
 		}
 
 		function renderHistoryPanel() {
+			const description = document.createElement("p");
+			description.className = "settings-field-desc";
+			description.textContent = "Text sent to the speech engine after text rules and playback start position are applied. One entry per submitted paragraph.";
+			contentBody.appendChild(description);
 			// Header row: count + clear button
 			const headerRow = document.createElement("div");
 			headerRow.style.cssText =
@@ -577,7 +592,7 @@ export async function initPillPlayer(
 				const tdText = document.createElement("td");
 				tdText.textContent = entry.text;
 				tdText.style.cssText =
-					"padding: 5px 8px; color: #ffffff; font-size: 11px;";
+					"padding: 5px 8px; color: #ffffff; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;";
 				tr.appendChild(tdNum);
 				tr.appendChild(tdText);
 				tbody.appendChild(tr);

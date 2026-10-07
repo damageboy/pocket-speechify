@@ -143,6 +143,10 @@ export class RemoteTTS extends EventTarget {
         this.dispatchEvent(new CustomEvent('word', { detail: msg.detail }));
         break;
       }
+      case 'tts-processed-text': {
+        this.dispatchEvent(new CustomEvent('processed-text', { detail: msg.detail }));
+        break;
+      }
       case 'tts-sentence-event': {
         // Fired by offscreen for each sentence it starts within a paragraph
         this.dispatchEvent(new CustomEvent('sentence', { detail: msg.detail }));

@@ -1,6 +1,7 @@
 // offscreen.js
 import { createWordTimeline } from '../../src/word-timeline.js';
 import { createStretchProcessor } from '../../src/stretch-processor.js';
+import { loadTextRules, preprocessText } from '../../src/text-rules.js';
 import {
   DEFAULT_LANGUAGE_ID,
   buildLanguageConfigYaml,
@@ -489,10 +490,24 @@ async function handlePlayParagraph(msg) {
   currentSpeed = speed;
   const myInternalGen = internalGenCounter;
   const myLoadToken = ++activeLoadToken;
+  if (isNewGeneration) paused = false;
+
+  // Seek in original page coordinates before applying the saved rules. Read
+  // them for each submission so settings changes also reach already-open tabs.
+  const pageWords = [...paragraphText.matchAll(/\S+/g)];
+  const startOffset = pageWords[startParaWordOffset]?.index ?? paragraphText.length;
+  const sourceText = paragraphText.slice(startOffset);
+  const rules = await loadTextRules(browser.storage.local);
+  if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
+  const processed = preprocessText(sourceText, rules);
+  const { text } = processed;
+  if (!text.trim()) {
+    sendToServiceWorker({ type: 'tts-paragraph-done', sourceSec: 0 }, owner);
+    return;
+  }
 
   const ctx = getAudioContext();
 
-  if (isNewGeneration) paused = false;
   if (!paused && ctx.state === 'suspended') await ctx.resume();
   if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
   nextStartTime = ctx.currentTime;
@@ -529,12 +544,9 @@ async function handlePlayParagraph(msg) {
     nextStartTime = ctx.currentTime;
   }
 
-  // Keep source spelling and indices intact. pocket-tts handles internal text
-  // splitting while retaining one cumulative timestamp clock for this stream.
-  const pageWords = [...paragraphText.matchAll(/\S+/g)];
-  const startOffset = pageWords[startParaWordOffset]?.index ?? paragraphText.length;
-  const text = paragraphText.slice(startOffset);
-  wordTimeline = createWordTimeline(text, startParaWordOffset, {
+  // Match engine spelling against processed text, then map back to the page.
+  wordTimeline = createWordTimeline(sourceText, startParaWordOffset, {
+    processed,
     inputLatency: stretchProcessor.inputLatency / SAMPLE_RATE,
     outputLatency: stretchProcessor.outputLatency / SAMPLE_RATE,
   });
@@ -548,6 +560,7 @@ async function handlePlayParagraph(msg) {
   const finished = new Promise(resolve => { paragraphDoneResolve = resolve; });
   startScheduler();
   worker.postMessage({ type: 'generate', genId: myInternalGen, text, voiceId: effectiveVoiceId });
+  sendToServiceWorker({ type: 'tts-processed-text', detail: { paragraphIndex, text } }, owner);
   await finished;
   if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
 

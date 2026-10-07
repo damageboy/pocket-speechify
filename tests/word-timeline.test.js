@@ -1,10 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import { createWordTimeline } from '../src/word-timeline.js';
+import { preprocessText } from '../src/text-rules.js';
 
 const start = (word, word_index, start_time) => ({ kind: 'word_start', word, word_index, start_time });
 const end = (word, word_index, start_time, end_time) => ({ kind: 'word_end', word, word_index, start_time, end_time });
 
 describe('timestamp playback timeline', () => {
+  it('maps processed words and reordered captures back to the original page after a seek', () => {
+    const text = 'Dr. Ada [12] met Bo.';
+    const processed = preprocessText(text, [
+      { name: 'Title', pattern: 'Dr\\.', flags: 'g', replacement: 'Medical doctor', enabled: true },
+      { name: 'Citations', pattern: '\\[12\\] ', flags: 'g', replacement: '', enabled: true },
+      { name: 'Names', pattern: '(Ada) (met) (Bo)', flags: 'g', replacement: '$3 $2 $1', enabled: true },
+    ]);
+    const timeline = createWordTimeline(text, 5, { processed });
+    timeline.addAudio(6, 0, 6);
+    timeline.addEvents([
+      start('Medical', 0, 0), start('doctor', 1, 1), start('Bo', 2, 2),
+      start('met', 3, 3), start('Ada', 4, 4),
+    ]);
+    expect([0, 1, 2, 3, 4].map(t => timeline.wordAt(t)?.wordIndex)).toEqual([5, 5, 9, 8, 6]);
+  });
+
+  it('does not highlight zero-width inserted words or engine spelling mismatches', () => {
+    const text = 'Hello.';
+    const processed = preprocessText(text, [
+      { name: 'Prefix', pattern: '^', flags: 'g', replacement: 'Note: ', enabled: true },
+    ]);
+    const timeline = createWordTimeline(text, 0, { processed });
+    timeline.addAudio(3, 0, 3);
+    timeline.addEvents([start('Note', 0, 0), start('wrong', 1, 1)]);
+    expect(timeline.wordAt(0)).toBeNull();
+    expect(timeline.wordAt(1)).toBeNull();
+  });
+
   it('ignores upstream pause markers while retaining original page word indices', () => {
     const timeline = createWordTimeline('Hello [pause:500ms] world.');
     timeline.addAudio(2, 0, 2);

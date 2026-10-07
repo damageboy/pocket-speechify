@@ -64,6 +64,14 @@ Then load `.output/chrome-mv3/` as an unpacked extension. After updating the WAS
 
 Page content refreshes as the DOM changes. Playback keeps its original queue through insertions; editing, removing, or reordering remaining queued text stops playback rather than highlighting unrelated text. Start again to read the updated content. Starting playback in another tab supersedes the previous tab.
 
+### Text preprocessing
+
+Open **Settings → Text rules** to edit the ordered regex replacement table. Defaults remove soft hyphens, normalize non-breaking spaces, and collapse whitespace. Add, remove, enable/disable, or reorder rules, then click **Save rules**. Rules are stored locally, apply to all sites and languages, and take effect on the next paragraph submitted (already-generated audio does not change). Removing every rule disables preprocessing.
+
+Patterns use JavaScript regex syntax without surrounding slashes. Flags support `g`, `i`, `m`, `s`, and `u`; replacements support capture references such as `$1` and `$<name>`, `$&` for the full match, and `$$` for a literal dollar sign. Empty replacements remove matches. For example, `\bDr\.` with flags `g` and replacement `Doctor` expands an English title. Keep custom patterns simple: syntax validation does not detect expensive backtracking.
+
+**Settings → History** shows the exact processed text submitted to the engine, one entry per paragraph, after trimming to the playback start position. Original page text stays unchanged. Fully removed paragraphs are skipped without submitting empty text to the engine.
+
 ### Controls
 
 | Control                  | Action                                                                      |
@@ -124,7 +132,7 @@ Speed changes are pitch-preserving. The offscreen document uses [Signalsmith Str
 
 The worker uses `start_stream_with_timestamps()` and `next_batch()` for models with calibrated `timestamp_heads`. The offscreen document maps native source-audio timestamps through each scheduled chunk's stretch ratio and the stretcher's input/output latency. It processes metadata-only final batches and waits for all queued audio, including the flushed tail, before advancing paragraphs.
 
-Original page text goes directly to pocket-tts; the extension no longer applies separate English abbreviation/number expansion or guesses normalized-to-page word indices. Lexical indices and spelling are matched against page words. Native boundaries are approximate (about 80 ms); ambiguous or unspoken words remain unhighlighted.
+Text rules run before submission to pocket-tts, retaining source offsets through replacements. Lexical indices and spelling are matched against the processed text, then mapped to original page words. Captures retain their original positions; literal replacement words highlight the first matched page word, and zero-width insertions have no page highlight. There is no automatic language-specific abbreviation/number expansion. Native boundaries are approximate (about 80 ms); ambiguous or unspoken words remain unhighlighted.
 
 All six English variants plus Dutch, German, Portuguese, and Spanish **24-layer** models currently support timestamps. Other catalog models retain audio playback without word highlighting. The duration/progress display still estimates unread audio; those estimates do not drive highlighting.
 

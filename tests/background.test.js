@@ -30,6 +30,15 @@ it('routes events after a service worker restart without a previous play message
   expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(4, { type: 'tts-superseded', sessionId: 'old', genId: 1, tabId: 4 });
 });
 
+it('routes processed engine text only to its owner and strips the offscreen source', () => {
+  receive({ source: 'offscreen', type: 'tts-processed-text', tabId: 4, sessionId: 'A', genId: 2,
+    detail: { paragraphIndex: 3, text: 'Doctor Ada.' } }, {});
+  expect(chrome.tabs.sendMessage).toHaveBeenCalledExactlyOnceWith(4, {
+    type: 'tts-processed-text', tabId: 4, sessionId: 'A', genId: 2,
+    detail: { paragraphIndex: 3, text: 'Doctor Ada.' },
+  });
+});
+
 it('preserves play/pause/cancel arrival order across getContexts delays', async () => {
   let ready;
   chrome.runtime.getContexts.mockImplementationOnce(() => new Promise(resolve => { ready = resolve; }));

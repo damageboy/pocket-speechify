@@ -62,6 +62,7 @@ export default defineBackground(() => {
       // Forward events only to the tab that initiated playback
       if (msg.type === 'download-progress' || msg.type === 'download-complete' ||
           msg.type === 'tts-word' || msg.type === 'tts-sentence-event' ||
+          msg.type === 'tts-processed-text' ||
           msg.type === 'tts-paragraph-done' || msg.type === 'tts-superseded') {
         sendToOwner(msg);
       }
