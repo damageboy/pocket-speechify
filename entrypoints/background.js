@@ -1,3 +1,5 @@
+import { loadTextRules } from '../src/text-rules.js';
+
 export default defineBackground(() => {
   let offscreenCreating = null;
   // Preserve command order even when offscreen discovery/creation is asynchronous.
@@ -74,11 +76,17 @@ export default defineBackground(() => {
 
   async function handleTTSFromContent(msg, tabId) {
     try {
+      const payload = { ...msg, source: 'service-worker', tabId };
+      if (msg.type === 'tts-play-paragraph') {
+        // Offscreen documents only expose runtime. Read fresh rules here so
+        // settings changes also reach paragraphs from already-open tabs.
+        payload.textRules = await loadTextRules(chrome.storage.local);
+      }
       console.log('[SW] Ensuring offscreen document...');
       await ensureOffscreenDocument();
       console.log('[SW] Offscreen ready. Forwarding:', msg.type);
       // Forward to offscreen doc with source tag + tab ID so it knows origin
-      await chrome.runtime.sendMessage({ ...msg, source: 'service-worker', tabId });
+      await chrome.runtime.sendMessage(payload);
       console.log('[SW] Message forwarded to offscreen');
     } catch (err) {
       console.error('[SW] handleTTSFromContent error:', err);

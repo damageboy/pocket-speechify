@@ -19,7 +19,8 @@ beforeEach(async () => {
   messages = [];
   workers = [];
   contexts = [];
-  vi.stubGlobal('browser', { storage: { local: { get: vi.fn(async () => ({})) } }, runtime: {
+  // Chrome offscreen documents expose runtime, but not storage or other extension APIs.
+  vi.stubGlobal('browser', { runtime: {
     onMessage: { addListener: fn => { receive = fn; } },
     sendMessage: msg => { messages.push(msg); },
     getURL: () => 'data:text/javascript,export default function(){}',
@@ -58,7 +59,7 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 async function play(overrides = {}) {
   receive({
     source: 'service-worker', type: 'tts-play-paragraph', genId: 7, tabId: 9, sessionId: 'A',
-    startPlayback: true,
+    startPlayback: true, textRules: [],
     paragraphText: 'Skipped sentence. Tiny elephant.', paragraphIndex: 2,
     startSentenceIndex: 1, startParaWordOffset: 2, sentenceWordOffsets: [0, 2],
     language: 'english', voiceId: 'alba', speed: 1, ...overrides,
@@ -73,11 +74,11 @@ async function play(overrides = {}) {
 const wordMessages = () => messages.filter(m => m.type === 'tts-word');
 
 it('submits and reports processed text after seeking, retaining original highlight indices', async () => {
-  browser.storage.local.get.mockResolvedValue({ 'pocket-speechify-text-rules': [
+  const textRules = [
     { name: 'Title', pattern: 'Dr\\.', replacement: 'Medical doctor', flags: 'g', enabled: true },
     { name: 'Citation', pattern: '\\[12\\] ', replacement: '', flags: 'g', enabled: true },
-  ] });
-  const { request, worker, genId, ctx } = await play({ paragraphText: 'Skip this. Dr. Ada [12] arrived.' });
+  ];
+  const { request, worker, genId, ctx } = await play({ paragraphText: 'Skip this. Dr. Ada [12] arrived.', textRules });
   expect(request.text).toBe('Medical doctor Ada arrived.');
   expect(messages.find(m => m.type === 'tts-processed-text')).toMatchObject({
     tabId: 9, sessionId: 'A', genId: 7,
@@ -94,11 +95,11 @@ it('submits and reports processed text after seeking, retaining original highlig
 });
 
 it('skips fully removed paragraphs without sending blank text to WASM or recording a submission', async () => {
-  browser.storage.local.get.mockResolvedValue({ 'pocket-speechify-text-rules': [
+  const textRules = [
     { name: 'Remove', pattern: '[\\s\\S]+', replacement: '', flags: 'g', enabled: true },
-  ] });
+  ];
   receive({ source: 'service-worker', type: 'tts-play-paragraph', genId: 7, tabId: 9, sessionId: 'A',
-    startPlayback: true, paragraphText: 'Remove me.', speed: 1 });
+    startPlayback: true, paragraphText: 'Remove me.', speed: 1, textRules });
   await vi.advanceTimersByTimeAsync(25);
   expect(workers.flatMap(worker => worker.sent).some(m => m.type === 'generate')).toBe(false);
   expect(messages.some(m => m.type === 'tts-processed-text')).toBe(false);
@@ -221,7 +222,7 @@ it('keeps asynchronous load failure attached to its original owner', async () =>
   let rejectFetch;
   caches.open = async () => ({ match: async () => null });
   vi.stubGlobal('fetch', () => new Promise((resolve, reject) => { rejectFetch = reject; }));
-  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9, sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello', speed: 1 });
+  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9, sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello', speed: 1, textRules: [] });
   await vi.advanceTimersByTimeAsync(0);
   const failOld = rejectFetch;
   caches.open = async () => ({ match: async () => ({ arrayBuffer: async () => new ArrayBuffer(1) }) });
@@ -264,7 +265,7 @@ it.each([200, 206])('resumes download with HTTP %i and caches exactly the final 
     return new Promise(resolve => { finishDownload = () => resolve(response); });
   }));
   receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9,
-    sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello.', speed: 1 });
+    sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello.', speed: 1, textRules: [] });
   await vi.advanceTimersByTimeAsync(0);
   modelMissing = false;
   const next = await play({ tabId: 10, sessionId: 'B' });
@@ -286,28 +287,12 @@ it('rejects a late old paragraph continuation without reclaiming the new owner',
   const next = await play({ tabId: 10, sessionId: 'B' });
   const count = contexts.length;
   receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9,
-    sessionId: 'A', genId: 7, startPlayback: false, paragraphText: 'Late old paragraph.', speed: 1 });
+    sessionId: 'A', genId: 7, startPlayback: false, paragraphText: 'Late old paragraph.', speed: 1, textRules: [] });
   old.worker.emit({ type: 'done', genId: old.genId });
   await vi.advanceTimersByTimeAsync(25);
   expect(contexts).toHaveLength(count);
   expect(next.ctx.state).toBe('running');
   expect(next.worker.sent.findLast(m => m.type === 'generate').genId).toBe(next.genId);
-});
-
-it.each(['tts-pause', 'tts-cancel'])('honors %s while rules are loading', async type => {
-  let loaded;
-  browser.storage.local.get.mockReturnValueOnce(new Promise(resolve => { loaded = resolve; }));
-  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9,
-    sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello.',
-    paragraphIndex: 0, startSentenceIndex: 0, sentenceWordOffsets: [0], speed: 1 });
-  receive({ source: 'service-worker', type, tabId: 9, sessionId: 'A', genId: 7 });
-  loaded({});
-  await vi.advanceTimersByTimeAsync(25);
-  if (type === 'tts-pause') expect(contexts.at(-1).state).toBe('suspended');
-  else {
-    expect(workers).toHaveLength(0);
-    expect(messages.some(m => m.type === 'tts-processed-text')).toBe(false);
-  }
 });
 
 it.each(['tts-pause', 'tts-cancel'])('honors %s while the first play is awaiting model download', async type => {
@@ -319,7 +304,7 @@ it.each(['tts-pause', 'tts-cancel'])('honors %s while the first play is awaiting
   } }) });
   receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9,
     sessionId: 'A', genId: 7, startPlayback: true, paragraphText: 'Hello.',
-    paragraphIndex: 0, startSentenceIndex: 0, sentenceWordOffsets: [0], speed: 1 });
+    paragraphIndex: 0, startSentenceIndex: 0, sentenceWordOffsets: [0], speed: 1, textRules: [] });
   await vi.advanceTimersByTimeAsync(0);
   const ctx = contexts.at(-1);
   receive({ source: 'service-worker', type, tabId: 9, sessionId: 'A', genId: 7 });

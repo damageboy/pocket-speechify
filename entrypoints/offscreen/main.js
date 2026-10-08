@@ -1,7 +1,7 @@
 // offscreen.js
 import { createWordTimeline } from '../../src/word-timeline.js';
 import { createStretchProcessor } from '../../src/stretch-processor.js';
-import { loadTextRules, preprocessText } from '../../src/text-rules.js';
+import { preprocessText } from '../../src/text-rules.js';
 import {
   DEFAULT_LANGUAGE_ID,
   buildLanguageConfigYaml,
@@ -463,6 +463,7 @@ async function handlePlayParagraph(msg) {
   const {
     genId,
     paragraphText,
+    textRules,
     paragraphIndex,
     startSentenceIndex,
     sentenceWordOffsets,
@@ -492,14 +493,11 @@ async function handlePlayParagraph(msg) {
   const myLoadToken = ++activeLoadToken;
   if (isNewGeneration) paused = false;
 
-  // Seek in original page coordinates before applying the saved rules. Read
-  // them for each submission so settings changes also reach already-open tabs.
+  // Seek in original page coordinates before applying the rules supplied by the service worker.
   const pageWords = [...paragraphText.matchAll(/\S+/g)];
   const startOffset = pageWords[startParaWordOffset]?.index ?? paragraphText.length;
   const sourceText = paragraphText.slice(startOffset);
-  const rules = await loadTextRules(browser.storage.local);
-  if (myInternalGen !== internalGenCounter || myLoadToken !== activeLoadToken) return;
-  const processed = preprocessText(sourceText, rules);
+  const processed = preprocessText(sourceText, textRules);
   const { text } = processed;
   if (!text.trim()) {
     sendToServiceWorker({ type: 'tts-paragraph-done', sourceSec: 0 }, owner);

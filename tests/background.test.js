@@ -1,9 +1,11 @@
 import { beforeEach, it, expect, vi } from 'vitest';
+import { DEFAULT_TEXT_RULES, TEXT_RULES_KEY } from '../src/text-rules.js';
 
 let receive;
 beforeEach(async () => {
   vi.resetModules();
   vi.stubGlobal('chrome', {
+    storage: { local: { get: vi.fn(async () => ({})) } },
     runtime: {
       onMessage: { addListener: fn => { receive = fn; } },
       getContexts: vi.fn(async () => [{}]),
@@ -15,6 +17,53 @@ beforeEach(async () => {
   });
   const { default: background } = await import('../entrypoints/background.js');
   background.main();
+});
+
+it('attaches defaults, current saved rules, and an intentionally empty list to paragraph requests', async () => {
+  const saved = [{ name: 'Expand', pattern: 'TTS', flags: 'g', replacement: 'text to speech', enabled: true }];
+  chrome.storage.local.get.mockResolvedValueOnce({})
+    .mockResolvedValueOnce({ [TEXT_RULES_KEY]: saved })
+    .mockResolvedValueOnce({ [TEXT_RULES_KEY]: [] });
+  for (let paragraphIndex = 0; paragraphIndex < 3; paragraphIndex++) {
+    receive({ type: 'tts-play-paragraph', sessionId: 'A', genId: 2, paragraphIndex }, { tab: { id: 1 } });
+  }
+  for (const type of ['tts-pause', 'tts-resume', 'tts-set-speed', 'tts-cancel']) {
+    receive({ type, sessionId: 'A', genId: 2 }, { tab: { id: 1 } });
+  }
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(7));
+  expect(chrome.runtime.sendMessage.mock.calls.slice(0, 3).map(([msg]) => msg.textRules))
+    .toEqual([DEFAULT_TEXT_RULES, saved, []]);
+  expect(chrome.storage.local.get).toHaveBeenCalledTimes(3);
+  expect(chrome.storage.local.get).toHaveBeenCalledWith(TEXT_RULES_KEY);
+  expect(chrome.runtime.sendMessage.mock.calls.slice(3).every(([msg]) => !('textRules' in msg))).toBe(true);
+});
+
+it('preserves play/pause/cancel arrival order while reading rules', async () => {
+  let loaded;
+  chrome.storage.local.get.mockReturnValueOnce(new Promise(resolve => { loaded = resolve; }));
+  for (const type of ['tts-play-paragraph', 'tts-pause', 'tts-cancel']) {
+    receive({ type, sessionId: 'A', genId: 1 }, { tab: { id: 1 } });
+  }
+  await vi.waitFor(() => expect(chrome.storage.local.get).toHaveBeenCalled());
+  expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  loaded({});
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(3));
+  expect(chrome.runtime.sendMessage.mock.calls.map(([msg]) => msg.type))
+    .toEqual(['tts-play-paragraph', 'tts-pause', 'tts-cancel']);
+});
+
+it('reports a rules read failure to its owner and continues forwarding the next request', async () => {
+  chrome.storage.local.get.mockRejectedValueOnce(new Error('rules unavailable'));
+  receive({ type: 'tts-play-paragraph', sessionId: 'A', genId: 2 }, { tab: { id: 1 } });
+  receive({ type: 'tts-play-paragraph', sessionId: 'B', genId: 3 }, { tab: { id: 4 } });
+  await vi.waitFor(() => expect(chrome.tabs.sendMessage).toHaveBeenCalled());
+  expect(chrome.tabs.sendMessage).toHaveBeenCalledExactlyOnceWith(1, {
+    type: 'tts-paragraph-done', sessionId: 'A', genId: 2, error: 'Error: rules unavailable', fatal: true,
+  });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledExactlyOnceWith({
+    type: 'tts-play-paragraph', sessionId: 'B', genId: 3, tabId: 4,
+    source: 'service-worker', textRules: DEFAULT_TEXT_RULES,
+  }));
 });
 
 it('routes original ownership while another tab is awaiting offscreen readiness', async () => {
