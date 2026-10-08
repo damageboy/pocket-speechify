@@ -16,7 +16,7 @@ import {
 } from "../src/playback-plan.js";
 import {
 	resolvePageLanguage,
-	saveLanguageOverride,
+	saveSpeechSelection,
 } from "../src/language-detection.js";
 import { getDefaultVoiceForLanguage } from "../src/languages.js";
 import {
@@ -88,6 +88,8 @@ export default defineContentScript({
 
 		const state = createState({
 			selectedLanguage: languageResolution.selectedLanguage,
+			voiceId: languageResolution.voiceId,
+			speed: languageResolution.speed ?? 1,
 			detectedLanguage: languageResolution.detectedLanguage,
 			languageSource: languageResolution.languageSource,
 			siteKey: languageResolution.siteKey,
@@ -402,23 +404,30 @@ export default defineContentScript({
 				if (!canMoveToParagraph(activePlaybackPlan, newPIdx)) return;
 				seekTo(newPIdx, newSIdx);
 			},
-			setSpeed(speed) {
-				log.debug(`setSpeed(${speed})`);
+			async setSpeed(speed) {
+				console.log(`[Pocket Speechify] Speed ${speed}x triggered`);
 				tts.setSpeed(speed);
 				state.dispatch({ speed });
+				const { selectedLanguage, voiceId } = state.get();
+				await saveSpeechSelection(selectedLanguage, voiceId, speed);
 			},
 			async setLanguage(languageId) {
 				console.log(`[Pocket Speechify] Language ${languageId} triggered`);
 				const voiceId = getDefaultVoiceForLanguage(languageId);
-				await saveLanguageOverride(state.get().siteKey, languageId);
 				tts.stop();
 				resetPlaybackState();
 				state.dispatch({
 					selectedLanguage: languageId,
-					languageSource: "override",
+					languageSource: "preference",
 					voiceId,
 					panelOpen: "voice",
 				});
+				await saveSpeechSelection(languageId, voiceId, state.get().speed);
+			},
+			async setVoice(voiceId) {
+				console.log(`[Pocket Speechify] Voice ${voiceId} triggered`);
+				state.dispatch({ voiceId, languageSource: "preference", panelOpen: null });
+				await saveSpeechSelection(state.get().selectedLanguage, voiceId, state.get().speed);
 			},
 		};
 

@@ -116,6 +116,66 @@ describe("loadLanguageOverrides", () => {
 });
 
 describe("resolvePageLanguage", () => {
+	it("restores the exact saved model and voice ahead of metadata and old site overrides", async () => {
+		chrome.storage.local.get.mockResolvedValue({
+			"pocket-speechify-speech-selection": {
+				selectedLanguage: "english_2026-09_24l",
+				voiceId: "vera",
+			},
+			[LANGUAGE_OVERRIDES_KEY]: { "example.com": "spanish" },
+		});
+		document.documentElement.lang = "fr-FR";
+		await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
+			selectedLanguage: "english_2026-09_24l",
+			voiceId: "vera",
+			detectedLanguage: "french",
+			languageSource: "preference",
+		});
+	});
+
+	it.each([
+		[0.4, 0.4], [1.7, 1.7], [4.5, 4.5],
+		[undefined, 1], [null, 1], ["1.7", 1], [0.3, 1], [4.6, 1], [NaN, 1], [Infinity, 1],
+	])("restores saved speed %s as %s without losing model or voice", async (speed, expected) => {
+		chrome.storage.local.get.mockResolvedValue({
+			"pocket-speechify-speech-selection": {
+				selectedLanguage: "english_2026-09_24l",
+				voiceId: "vera",
+				speed,
+			},
+		});
+		await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
+			selectedLanguage: "english_2026-09_24l",
+			voiceId: "vera",
+			speed: expected,
+		});
+	});
+
+	it("keeps the saved model but replaces an unavailable voice with its default", async () => {
+		chrome.storage.local.get.mockResolvedValue({
+			"pocket-speechify-speech-selection": {
+				selectedLanguage: "french_24l",
+				voiceId: "removed-voice",
+			},
+		});
+		await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
+			selectedLanguage: "french_24l",
+			voiceId: "estelle",
+		});
+	});
+
+	it.each([null, "french", ["french"], { selectedLanguage: "removed-model", voiceId: "vera" }])(
+		"ignores invalid saved selections (%j) without suppressing metadata detection",
+		async selection => {
+			chrome.storage.local.get.mockResolvedValue({ "pocket-speechify-speech-selection": selection });
+			document.documentElement.lang = "de-DE";
+			await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
+				selectedLanguage: "german",
+				languageSource: "metadata",
+			});
+		},
+	);
+
 	it("uses domain override before metadata", async () => {
 		chrome.storage.local.get.mockResolvedValue({
 			[LANGUAGE_OVERRIDES_KEY]: { "example.com": "spanish" },

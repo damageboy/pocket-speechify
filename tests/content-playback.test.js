@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-// Observe the entrypoint's UI contract; extraction, state, RemoteTTS and
-// highlighting remain real. Audio messages stand in for the extension host.
+// Observe the entrypoint's UI contract; panels, extraction, state, RemoteTTS
+// and highlighting remain real. Audio messages stand in for the extension host.
 const ui = vi.hoisted(() => ({}));
 vi.mock('../src/pill-player.js', () => ({
-  initPillPlayer: async (shadow, state, actions) => Object.assign(ui, { state, actions }),
+  initPillPlayer: async (shadow, state, actions) => {
+    shadow.innerHTML = '<div class="pill-container"></div>';
+    Object.assign(ui, { shadow, state, actions });
+  },
 }));
-vi.mock('../src/side-panels.js', () => ({ initSidePanels() {} }));
 vi.mock('wxt/browser', () => ({ get browser() { return globalThis.chrome; } }));
 
 let listeners, cleanup;
@@ -18,11 +20,23 @@ async function refresh() {
   await vi.advanceTimersByTimeAsync(150);
 }
 
-beforeEach(async () => {
+async function loadPage(url = 'https://example.com/article', lang = '') {
+  cleanup?.();
+  listeners = [];
   vi.resetModules();
+  location.href = url;
+  document.head.replaceChildren();
+  document.documentElement.lang = lang;
+  document.body.innerHTML = `<main><p id="first">${'First words '.repeat(40)}.</p><p id="second">${'Second words '.repeat(40)}.</p></main>`;
+  const { default: content } = await import('../entrypoints/content.js');
+  await content.main({ onInvalidated(fn) { cleanup = fn; } });
+}
+
+beforeEach(async () => {
   vi.useFakeTimers();
   listeners = [];
   cleanup = null;
+  const stored = {};
   vi.stubGlobal('CSS', { highlights: new Map() });
   vi.stubGlobal('Highlight', class extends Set { constructor(...ranges) { super(ranges); } });
   vi.stubGlobal('location', { href: 'https://example.com/article' });
@@ -33,12 +47,14 @@ beforeEach(async () => {
       sendMessage: vi.fn(),
       onMessage: { addListener: fn => listeners.push(fn), removeListener: vi.fn() },
     },
-    storage: { local: { get: async () => ({}) } },
+    storage: { local: {
+      get: vi.fn(async keys => Object.fromEntries(
+        (Array.isArray(keys) ? keys : [keys]).map(key => [key, structuredClone(stored[key])]),
+      )),
+      set: vi.fn(async values => { Object.assign(stored, structuredClone(values)); }),
+    } },
   });
-  document.head.replaceChildren();
-  document.body.innerHTML = `<main><p id="first">${'First words '.repeat(40)}.</p><p id="second">${'Second words '.repeat(40)}.</p></main>`;
-  const { default: content } = await import('../entrypoints/content.js');
-  await content.main({ onInvalidated(fn) { cleanup = fn; } });
+  await loadPage();
 });
 
 afterEach(() => {
@@ -47,6 +63,97 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
+});
+
+it('restores a chosen model and voice on reload and on another site, including the first playback request', async () => {
+  ui.state.dispatch({ panelOpen: 'voice' });
+  const select = ui.shadow.querySelector('.language-selector');
+  select.value = 'english_2026-09_24l';
+  select.dispatchEvent(new Event('change'));
+  await refresh();
+  [...ui.shadow.querySelectorAll('.voice-item')].find(item => item.querySelector('.voice-name').textContent === 'Vera').click();
+  await refresh();
+
+  for (const url of ['https://example.com/article', 'https://another.org/story']) {
+    await loadPage(url, 'fr-FR');
+    ui.state.dispatch({ panelOpen: 'voice' });
+    expect(ui.shadow.querySelector('.language-selector').value).toBe('english_2026-09_24l');
+    expect(ui.shadow.querySelector('.voice-item.selected .voice-name').textContent).toBe('Vera');
+    ui.actions.play();
+    expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera' });
+  }
+});
+
+it('persists a model change even without a subsequent voice click', async () => {
+  await ui.actions.setLanguage('french_24l');
+  await loadPage('https://another.org/story', 'en-US');
+  ui.actions.play();
+  expect(request()).toMatchObject({ language: 'french_24l', voiceId: 'estelle' });
+});
+
+it('restores a speed-only change in the controls and first playback after reload or opening another site', async () => {
+  ui.state.dispatch({ panelOpen: 'speed' });
+  const slider = ui.shadow.querySelector('.speed-slider');
+  slider.value = '1.7';
+  slider.dispatchEvent(new Event('input'));
+  await refresh();
+
+  for (const url of ['https://example.com/article', 'https://another.org/story']) {
+    await loadPage(url);
+    ui.state.dispatch({ panelOpen: 'speed' });
+    expect(ui.shadow.querySelector('.speed-slider').value).toBe('1.7');
+    expect(ui.shadow.querySelector('.speed-value').textContent).toBe('1.7x');
+    ui.actions.play();
+    expect(request().speed).toBe(1.7);
+  }
+});
+
+it('preserves saved speed through model and voice changes and persists later speed changes', async () => {
+  await ui.actions.setSpeed(0.8);
+  await ui.actions.setLanguage('english_2026-09_24l');
+  await loadPage();
+  expect(ui.state.get().speed).toBe(0.8);
+  await ui.actions.setVoice('vera');
+  await loadPage();
+  ui.actions.play();
+  expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera', speed: 0.8 });
+
+  await ui.actions.setSpeed(2.3);
+  await loadPage();
+  ui.actions.play();
+  expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera', speed: 2.3 });
+});
+
+it('persists an explicit click on the already selected voice without changing the model first', async () => {
+  ui.state.dispatch({ panelOpen: 'voice' });
+  ui.shadow.querySelector('.voice-item.selected').click();
+  await refresh();
+  await loadPage('https://another.org/story', 'de-DE');
+  ui.actions.play();
+  expect(request()).toMatchObject({ language: 'english', voiceId: 'alba' });
+});
+
+it('does not save detected defaults just because a page initializes', async () => {
+  await loadPage('https://another.org/story', 'fr-FR');
+  expect(ui.state.get().selectedLanguage).toBe('french');
+  expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  ui.actions.play();
+  expect(request().speed).toBe(1);
+});
+
+it('still changes the model and voice when storage writes fail', async () => {
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    chrome.storage.local.set.mockRejectedValue(new Error('storage failed'));
+    await ui.actions.setLanguage('french_24l');
+    [...ui.shadow.querySelectorAll('.voice-item')].find(item => item.querySelector('.voice-name').textContent === 'Marius').click();
+    await refresh();
+    ui.actions.play();
+    expect(request()).toMatchObject({ language: 'french_24l', voiceId: 'marius' });
+    expect(warning).toHaveBeenCalled();
+  } finally {
+    warning.mockRestore();
+  }
 });
 
 it('records only processed engine submissions, not original sentences or stale generations', () => {

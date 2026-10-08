@@ -336,7 +336,7 @@ function createVoicePanel(state, actions) {
 
       item.addEventListener('click', () => {
         console.log(`[Pocket Speechify] Voice ${voice.name} triggered`);
-        state.dispatch({ voiceId: voice.id, panelOpen: null });
+        actions.setVoice(voice.id);
       });
 
       listEl.appendChild(item);
