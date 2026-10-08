@@ -25,7 +25,7 @@ async function renderPill({ paragraphs = [], options } = {}) {
 	const state = createState();
 	const actions = createActions();
 
-	await initPillPlayer(shadow, state, actions, paragraphs, [], options);
+	await initPillPlayer(shadow, state, actions, paragraphs, options);
 
 	return {
 		shadow,
@@ -149,6 +149,61 @@ describe("initPillPlayer", () => {
 			section.click();
 			expect(shadow.querySelector('.settings-content-body').textContent.trim()).not.toBe('');
 		}
+	});
+
+	it("updates open history on submissions, including after clearing it", async () => {
+		const { shadow, state } = await renderPill();
+		shadow.querySelector('[aria-label="Settings"]').click();
+		[...shadow.querySelectorAll('.settings-nav-item')].find(button => button.textContent === 'History').click();
+		const body = shadow.querySelector('.settings-content-body');
+		const rows = () => [...body.querySelectorAll('tbody tr')].map(row => row.textContent);
+		expect(body.textContent).toContain('No entries yet');
+		expect(body.querySelector('button').disabled).toBe(true);
+
+		state.dispatch({ ttsHistory: [{ paragraphIndex: 2, text: 'First processed paragraph.' }] });
+		expect(rows()).toEqual(['1First processed paragraph.']);
+		expect(body.textContent).toContain('1 entry');
+		expect(body.querySelector('button').disabled).toBe(false);
+		body.querySelector('table').parentElement.scrollTop = 75;
+
+		state.dispatch({ ttsHistory: [
+			...state.get().ttsHistory,
+			{ paragraphIndex: 4, text: 'Next <processed> paragraph.' },
+		] });
+		expect(rows()).toEqual(['1First processed paragraph.', '2Next <processed> paragraph.']);
+		expect(body.textContent).toContain('2 entries');
+		expect(body.querySelector('table').parentElement.scrollTop).toBe(75);
+		const table = body.querySelector('table');
+		state.dispatch({ currentWordIndex: 3 });
+		expect(body.querySelector('table')).toBe(table);
+
+		body.querySelector('button').click();
+		expect(state.get().ttsHistory).toEqual([]);
+		expect(rows()).toEqual([]);
+		expect(body.textContent).toContain('No entries yet');
+		expect(body.querySelector('button').disabled).toBe(true);
+		state.dispatch({ ttsHistory: [{ paragraphIndex: 5, text: 'After clearing.' }] });
+		expect(rows()).toEqual(['1After clearing.']);
+	});
+
+	it.each(['Close settings', 'Settings'])("stops updating closed history via %s and refreshes on reopening", async (closeLabel) => {
+		const { shadow, state } = await renderPill();
+		const settings = shadow.querySelector('[aria-label="Settings"]');
+		const selectHistory = () => [...shadow.querySelectorAll('.settings-nav-item')].find(button => button.textContent === 'History').click();
+		settings.click();
+		const slider = shadow.querySelector('.settings-slider');
+		state.dispatch({ ttsHistory: [{ paragraphIndex: 0, text: 'While General is open.' }] });
+		expect(shadow.querySelector('.settings-slider')).toBe(slider);
+		selectHistory();
+		const closedBody = shadow.querySelector('.settings-content-body');
+		expect(closedBody.textContent).toContain('While General is open.');
+		shadow.querySelector(`[aria-label="${closeLabel}"]`).click();
+		expect(shadow.querySelector('.settings-dialog')).toBeNull();
+		state.dispatch({ ttsHistory: [...state.get().ttsHistory, { paragraphIndex: 1, text: 'While closed.' }] });
+		expect(closedBody.textContent).not.toContain('While closed.');
+		settings.click();
+		selectHistory();
+		expect(shadow.querySelector('.settings-content-body').textContent).toContain('While closed.');
 	});
 });
 

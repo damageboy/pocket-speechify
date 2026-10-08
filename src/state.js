@@ -54,6 +54,7 @@ export function createState(initialPatch = {}) {
 		initialPatch.voiceId || getDefaultVoiceForLanguage(initialLanguage);
 	const initialState = {
 		...INITIAL_STATE,
+		ttsHistory: [],
 		...initialPatch,
 		selectedLanguage: initialLanguage,
 		voiceId: initialVoice,

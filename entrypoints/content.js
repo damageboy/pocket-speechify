@@ -94,9 +94,6 @@ export default defineContentScript({
 			hasPlayableContent,
 		});
 
-		/** @type {{ text: string, paragraphIndex: number, sentenceIndex: number }[]} */
-		const ttsHistory = [];
-
 		const tts = new RemoteTTS();
 		tts.setLanguage(state.get().selectedLanguage);
 		tts.setVoice(state.get().voiceId);
@@ -224,9 +221,11 @@ export default defineContentScript({
 			const { paragraphIndex, text } = e.detail;
 			const globalParagraphIndex = realParagraphIndex(paragraphIndex);
 			if (globalParagraphIndex === null) return;
-			ttsHistory.push({
-				text,
-				paragraphIndex: globalParagraphIndex,
+			state.dispatch({
+				ttsHistory: [
+					...state.get().ttsHistory,
+					{ text, paragraphIndex: globalParagraphIndex },
+				],
 			});
 		});
 
@@ -425,7 +424,7 @@ export default defineContentScript({
 
 		updateProgress();
 
-		await initPillPlayer(shadow, state, actions, paragraphs, ttsHistory, {
+		await initPillPlayer(shadow, state, actions, paragraphs, {
 			initiallyVisible: shouldAutoShow(contentSource, articleDetection),
 			hasPlayableContent,
 		});

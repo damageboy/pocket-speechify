@@ -151,7 +151,6 @@ export async function initPillPlayer(
 	state,
 	actions,
 	paragraphs,
-	ttsHistory = [],
 	options = {},
 ) {
 	let hasContent = options.hasPlayableContent ?? paragraphs.length > 0;
@@ -378,6 +377,7 @@ export async function initPillPlayer(
 		pill.appendChild(aboutPanel);
 	});
 	// Settings button (32x32)
+	let unsubscribeHistory;
 	const settingsBtn = document.createElement("button");
 	settingsBtn.className = "btn btn-32 btn-standard";
 	settingsBtn.setAttribute("aria-label", "Settings");
@@ -391,6 +391,7 @@ export async function initPillPlayer(
 		const existing = shadow.querySelector(".settings-dialog");
 		if (existing) {
 			saveSettings();
+			unsubscribeHistory();
 			existing.remove();
 			return;
 		}
@@ -432,6 +433,7 @@ export async function initPillPlayer(
 			ev.stopPropagation();
 			console.log("[Pocket Speechify] Settings dialog close clicked");
 			saveSettings();
+			unsubscribeHistory();
 			dialog.remove();
 		});
 
@@ -521,6 +523,7 @@ export async function initPillPlayer(
 		}
 
 		function renderHistoryPanel() {
+			const { ttsHistory } = state.get();
 			const description = document.createElement("p");
 			description.className = "settings-field-desc";
 			description.textContent = "Text sent to the speech engine after text rules and playback start position are applied. One entry per submitted paragraph.";
@@ -545,9 +548,7 @@ export async function initPillPlayer(
 			clearBtn.addEventListener("click", (ev) => {
 				ev.stopPropagation();
 				console.log("[Pocket Speechify] Clear History button clicked");
-				ttsHistory.length = 0;
-				active = "History";
-				renderContent();
+				state.dispatch({ ttsHistory: [] });
 			});
 
 			headerRow.appendChild(countLabel);
@@ -636,6 +637,14 @@ export async function initPillPlayer(
 		});
 		// Append to shadow root (not pill) — avoids pill's scale(1.5) transform
 		shadow.appendChild(dialog);
+		unsubscribeHistory = state.subscribe((current, prev) => {
+			if (active !== "History" || current.ttsHistory === prev.ttsHistory) return;
+			console.log("[Pocket Speechify] History update triggered");
+			const scrollTop = contentBody.querySelector("table")?.parentElement.scrollTop ?? 0;
+			renderContent();
+			const wrapper = contentBody.querySelector("table")?.parentElement;
+			if (wrapper) wrapper.scrollTop = scrollTop;
+		});
 	});
 	pillBottom.appendChild(settingsBtn);
 	pillBottom.appendChild(aboutBtn);
