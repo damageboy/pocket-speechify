@@ -1,6 +1,8 @@
 import { loadTextRules } from '../src/text-rules.js';
+import { createSpeechProfileStore } from '../src/speech-preferences.js';
 
 export default defineBackground(() => {
+  const profiles = createSpeechProfileStore(chrome.storage.local);
   let offscreenCreating = null;
   // Preserve command order even when offscreen discovery/creation is asynchronous.
   let forwarding = Promise.resolve();
@@ -31,11 +33,24 @@ export default defineBackground(() => {
 
   const lastLoggedBucket = new Map();
 
-  chrome.runtime.onMessage.addListener((msg, sender) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !msg.type) return;
 
     // --- Messages FROM content scripts (have sender.tab) ---
     if (sender.tab) {
+      if (['speech-detect-language', 'speech-profile-get', 'speech-profile-update'].includes(msg.type)) {
+        // Detection and preferences never create or block the audio pipeline.
+        const result = Promise.resolve().then(() => {
+          if (msg.type === 'speech-detect-language') return chrome.i18n.detectLanguage(String(msg.text || '').slice(0, 12000));
+          return msg.type === 'speech-profile-get'
+            ? profiles.get(msg.language) : profiles.update(msg.language, msg.patch || {});
+        });
+        result.then(sendResponse, error => {
+          console.warn('[Pocket Speechify] Speech settings request failed:', error);
+          sendResponse({ error: String(error) });
+        });
+        return true;
+      }
       console.log('[SW] From content script:', msg.type, msg);
       // TTS control messages: forward to offscreen document
       if (msg.type.startsWith('tts-')) {

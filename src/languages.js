@@ -45,7 +45,7 @@ export function languageFromLocale(locale) {
   if (!locale || typeof locale !== 'string') return null;
   const primary = locale.trim().toLowerCase().replace('_', '-').split('-')[0];
   const language = LOCALES[primary]?.language;
-  return isSupportedLanguage(language) ? language : null;
+  return LANGUAGES.some(model => model.language === language) ? language : null;
 }
 
 // Include the complete pinned URL, not just a language/path. This also versions

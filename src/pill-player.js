@@ -263,7 +263,7 @@ export async function initPillPlayer(
 				const current = state.get();
 				if (
 					current.voiceId !== voiceId ||
-					current.selectedLanguage !== languageId
+					current.selectedModelId !== languageId
 				)
 					return;
 				console.log(
@@ -280,7 +280,7 @@ export async function initPillPlayer(
 		voiceBtn.appendChild(flagBadge);
 	}
 
-	renderVoiceButton(initState.voiceId, initState.selectedLanguage);
+	renderVoiceButton(initState.voiceId, initState.selectedModelId);
 	voiceBtn.addEventListener("click", (e) => {
 		e.stopPropagation();
 		console.log("[Pocket Speechify] Voice button clicked");
@@ -701,9 +701,9 @@ export async function initPillPlayer(
 		// Update voice avatar and language badge when voice or language changes
 		if (
 			current.voiceId !== prev.voiceId ||
-			current.selectedLanguage !== prev.selectedLanguage
+			current.selectedModelId !== prev.selectedModelId
 		) {
-			renderVoiceButton(current.voiceId, current.selectedLanguage);
+			renderVoiceButton(current.voiceId, current.selectedModelId);
 		}
 
 		// Show download progress as circular ring around play button

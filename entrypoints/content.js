@@ -14,11 +14,9 @@ import {
 	findParagraphIndex,
 	toGlobalParagraphIndex,
 } from "../src/playback-plan.js";
-import {
-	resolvePageLanguage,
-	saveSpeechSelection,
-} from "../src/language-detection.js";
-import { getDefaultVoiceForLanguage } from "../src/languages.js";
+import { resolvePageLanguage } from "../src/language-detection.js";
+import { getLanguage, isSupportedLanguage } from "../src/languages.js";
+import { normalizeSpeechProfile } from "../src/speech-preferences.js";
 import {
 	computeProgress,
 	createRateMeter,
@@ -64,16 +62,44 @@ export default defineContentScript({
 		style.textContent = cssText;
 		shadow.appendChild(style);
 
-		const languageResolution = await resolvePageLanguage(
-			new URL(location.href),
-			document,
-		);
-		console.log(
-			`[Pocket Speechify] Language resolved: ${languageResolution.selectedLanguage} (${languageResolution.languageSource})`,
-		);
 		const pageUrl = new URL(location.href);
 		const contentSource = createContentSource(pageUrl, document);
 		const paragraphs = contentSource.getParagraphs();
+		function articleSample() {
+			let text = "";
+			for (const paragraph of paragraphs) {
+				text += `${paragraph.text}\n`;
+				if (text.length >= 12000) break;
+			}
+			return text.slice(0, 12000);
+		}
+		const languageResolution = await resolvePageLanguage(pageUrl, document, articleSample());
+		console.log(`[Pocket Speechify] Language resolved: ${languageResolution.activeLanguage} (${languageResolution.languageSource})`);
+		const localProfiles = new Map();
+		const unsavedLanguages = new Set();
+		let profileWrites = Promise.resolve();
+		let operationRevision = 0;
+		let manualLanguage = false;
+		async function profileRequest(type, language, patch) {
+			const result = await chrome.runtime.sendMessage({ type, language, ...(patch ? { patch } : {}) });
+			if (!result || result.error) throw new Error(result?.error || "Speech settings unavailable");
+			return normalizeSpeechProfile(language, result);
+		}
+		async function loadProfile(language) {
+			await profileWrites;
+			if (!unsavedLanguages.has(language)) {
+				try {
+					localProfiles.set(language, await profileRequest("speech-profile-get", language));
+				} catch (error) {
+					console.warn("[Pocket Speechify] Could not load speech profile:", error);
+				}
+			}
+			return localProfiles.get(language) || normalizeSpeechProfile(language);
+		}
+		function profileState(profile) {
+			return { selectedModelId: profile.modelId, voiceId: profile.voiceId, speed: profile.speed };
+		}
+		const initialProfile = await loadProfile(languageResolution.activeLanguage);
 		log.info(
 			`Extracted ${paragraphs.length} paragraphs via ${contentSource.site}`,
 		);
@@ -87,17 +113,31 @@ export default defineContentScript({
 		);
 
 		const state = createState({
-			selectedLanguage: languageResolution.selectedLanguage,
-			voiceId: languageResolution.voiceId,
-			speed: languageResolution.speed ?? 1,
-			detectedLanguage: languageResolution.detectedLanguage,
-			languageSource: languageResolution.languageSource,
-			siteKey: languageResolution.siteKey,
+			...languageResolution,
+			...profileState(initialProfile),
 			hasPlayableContent,
 		});
 
+		function saveProfile(patch) {
+			const { activeLanguage, selectedModelId, voiceId, speed } = state.get();
+			const profile = normalizeSpeechProfile(activeLanguage, { modelId: selectedModelId, voiceId, speed, ...patch });
+			localProfiles.set(activeLanguage, profile);
+			state.dispatch(profileState(profile));
+			profileWrites = profileWrites.then(async () => {
+				try {
+					await profileRequest("speech-profile-update", activeLanguage, unsavedLanguages.has(activeLanguage) ? profile : patch);
+					unsavedLanguages.delete(activeLanguage);
+				} catch (error) {
+					unsavedLanguages.add(activeLanguage);
+					console.warn("[Pocket Speechify] Could not save speech profile:", error);
+				}
+				state.dispatch({ preferencesError: unsavedLanguages.has(state.get().activeLanguage) });
+			});
+			return profileWrites;
+		}
+
 		const tts = new RemoteTTS();
-		tts.setLanguage(state.get().selectedLanguage);
+		tts.setLanguage(state.get().selectedModelId);
 		tts.setVoice(state.get().voiceId);
 		let activePlaybackPlan = createPlaybackPlan({
 			paragraphs,
@@ -189,7 +229,7 @@ export default defineContentScript({
 
 		tts.addEventListener("download-progress", (e) => {
 			const { asset, voiceId, language, percent } = e.detail;
-			const cacheLanguage = language || state.get().selectedLanguage;
+			const cacheLanguage = language || state.get().selectedModelId;
 			state.dispatch({
 				downloadProgress: { asset, voiceId, language: cacheLanguage, percent },
 			});
@@ -202,7 +242,7 @@ export default defineContentScript({
 
 		tts.addEventListener("download-complete", (e) => {
 			const { asset, voiceId, language } = e.detail;
-			const cacheLanguage = language || state.get().selectedLanguage;
+			const cacheLanguage = language || state.get().selectedModelId;
 			if (asset === "voice" && voiceId) {
 				const key = state.voiceCacheKey(cacheLanguage, voiceId);
 				const voiceCache = { ...state.get().voiceCache, [key]: "cached" };
@@ -235,12 +275,12 @@ export default defineContentScript({
 		state.subscribe((current, prev) => {
 			const voiceChanged =
 				current.voiceId !== prev.voiceId ||
-				current.selectedLanguage !== prev.selectedLanguage;
+				current.selectedModelId !== prev.selectedModelId;
 			if (current.voiceId !== prev.voiceId) {
 				tts.setVoice(current.voiceId);
 			}
-			if (current.selectedLanguage !== prev.selectedLanguage) {
-				tts.setLanguage(current.selectedLanguage);
+			if (current.selectedModelId !== prev.selectedModelId) {
+				tts.setLanguage(current.selectedModelId);
 			}
 			// Speech rate differs per voice and language.
 			if (voiceChanged) rateMeter.reset();
@@ -280,7 +320,7 @@ export default defineContentScript({
 				activePlaybackPlan.ttsStartParagraph,
 				fromWord,
 				state.get().speed,
-				state.get().selectedLanguage,
+				state.get().selectedModelId,
 			);
 		}
 
@@ -311,9 +351,17 @@ export default defineContentScript({
 		}
 
 		const actions = {
-			play(fromParagraph) {
+			async play(fromParagraph) {
+				if (state.get().speechSettingsLoading) return;
 				const target = fromParagraph === undefined ? null : paragraphs[fromParagraph];
 				contentSource.refresh();
+				const revision = ++operationRevision;
+				const resolution = manualLanguage ? null : await resolvePageLanguage(new URL(location.href), document, articleSample());
+				if (revision !== operationRevision) return;
+				const language = resolution?.activeLanguage || state.get().activeLanguage;
+				const profile = await loadProfile(language);
+				if (revision !== operationRevision) return;
+				state.dispatch({ ...resolution, ...profileState(profile), preferencesError: unsavedLanguages.has(language) });
 				fromParagraph = target ? findParagraphIndex(paragraphs, target) : 0;
 				if (fromParagraph < 0) return;
 				if (!state.get().hasPlayableContent) {
@@ -345,6 +393,8 @@ export default defineContentScript({
 			},
 			stop() {
 				log.debug("stop");
+				operationRevision++;
+				state.dispatch({ speechSettingsLoading: false });
 				tts.stop();
 				resetPlaybackState();
 			},
@@ -406,28 +456,42 @@ export default defineContentScript({
 			},
 			async setSpeed(speed) {
 				console.log(`[Pocket Speechify] Speed ${speed}x triggered`);
+				if (state.get().speechSettingsLoading) return;
+				operationRevision++;
 				tts.setSpeed(speed);
-				state.dispatch({ speed });
-				const { selectedLanguage, voiceId } = state.get();
-				await saveSpeechSelection(selectedLanguage, voiceId, speed);
+				await saveProfile({ speed });
 			},
 			async setLanguage(languageId) {
 				console.log(`[Pocket Speechify] Language ${languageId} triggered`);
-				const voiceId = getDefaultVoiceForLanguage(languageId);
+				const revision = ++operationRevision;
+				manualLanguage = true;
 				tts.stop();
 				resetPlaybackState();
+				state.dispatch({ speechSettingsLoading: true, panelOpen: "voice" });
+				const profile = await loadProfile(languageId);
+				if (revision !== operationRevision) return;
 				state.dispatch({
-					selectedLanguage: languageId,
-					languageSource: "preference",
-					voiceId,
-					panelOpen: "voice",
+					activeLanguage: languageId,
+					languageSource: "manual",
+					...profileState(profile),
+					speechSettingsLoading: false,
+					preferencesError: unsavedLanguages.has(languageId),
 				});
-				await saveSpeechSelection(languageId, voiceId, state.get().speed);
+			},
+			async setModel(modelId) {
+				console.log(`[Pocket Speechify] Model ${modelId} triggered`);
+				if (state.get().speechSettingsLoading || !isSupportedLanguage(modelId) || getLanguage(modelId).language !== state.get().activeLanguage) return;
+				operationRevision++;
+				tts.stop();
+				resetPlaybackState();
+				await saveProfile({ modelId });
 			},
 			async setVoice(voiceId) {
 				console.log(`[Pocket Speechify] Voice ${voiceId} triggered`);
-				state.dispatch({ voiceId, languageSource: "preference", panelOpen: null });
-				await saveSpeechSelection(state.get().selectedLanguage, voiceId, state.get().speed);
+				if (state.get().speechSettingsLoading) return;
+				operationRevision++;
+				state.dispatch({ panelOpen: null });
+				await saveProfile({ voiceId });
 			},
 		};
 
@@ -477,6 +541,8 @@ export default defineContentScript({
 		);
 
 		contentSource.subscribe(() => {
+			// An in-flight text detector describes the previous article snapshot.
+			if (!state.get().speechSettingsLoading) operationRevision++;
 			const nextArticleDetection = detectReadableArticle(document, paragraphs);
 			const nextHasPlayableContent = getPlayableContentStatus(
 				contentSource,
@@ -516,6 +582,7 @@ export default defineContentScript({
 
 		ctx.onInvalidated(() => {
 			console.log("[Pocket Speechify] Content cleanup triggered");
+			operationRevision++;
 			contentSource.destroy();
 			highlights?.destroy();
 			tts.destroy();

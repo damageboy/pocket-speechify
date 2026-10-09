@@ -1,304 +1,73 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	LANGUAGE_OVERRIDES_KEY,
-	detectMetadataLanguage,
-	getSiteLanguageKey,
-	loadLanguageOverrides,
-	resolvePageLanguage,
-	saveLanguageOverride,
-} from "../src/language-detection.js";
+import { beforeEach, expect, it, vi } from 'vitest';
+import { detectMetadataLanguage, getSiteLanguageKey, resolvePageLanguage } from '../src/language-detection.js';
 
 beforeEach(() => {
-	document.head.replaceChildren();
-	document.body.replaceChildren();
-	document.documentElement.removeAttribute("lang");
-	globalThis.chrome = {
-		storage: {
-			local: {
-				get: vi.fn(async () => ({})),
-				set: vi.fn(async () => {}),
-			},
-		},
-	};
+  document.head.replaceChildren();
+  document.documentElement.removeAttribute('lang');
+  vi.stubGlobal('chrome', {
+    runtime: { sendMessage: vi.fn(async () => ({ isReliable: false, languages: [] })) },
+    storage: { local: { get: vi.fn(async () => ({})) } },
+  });
 });
 
-describe("getSiteLanguageKey", () => {
-	it("uses registrable domains for subdomains", () => {
-		expect(getSiteLanguageKey("www.news.example.co.uk")).toBe("example.co.uk");
-	});
-
-	it("keeps localhost and IP hosts exact", () => {
-		expect(getSiteLanguageKey("localhost")).toBe("localhost");
-		expect(getSiteLanguageKey("127.0.0.1")).toBe("127.0.0.1");
-	});
+it('normalizes regions and keeps metadata priority', () => {
+  document.documentElement.lang = 'fr-CA';
+  document.head.innerHTML = '<meta property="og:locale" content="en_US">';
+  expect(detectMetadataLanguage(document)).toEqual({ language: 'french', raw: 'fr-CA' });
+  document.documentElement.removeAttribute('lang');
+  expect(detectMetadataLanguage(document).language).toBe('english');
 });
 
-describe("detectMetadataLanguage", () => {
-	it("detects html lang before metadata tags", () => {
-		document.documentElement.lang = "de-DE";
-		const meta = document.createElement("meta");
-		meta.setAttribute("property", "og:locale");
-		meta.content = "en_US";
-		document.head.appendChild(meta);
-		expect(detectMetadataLanguage(document)).toEqual({
-			language: "german",
-			raw: "de-DE",
-		});
-	});
-
-	it("detects og locale", () => {
-		const meta = document.createElement("meta");
-		meta.setAttribute("property", "og:locale");
-		meta.content = "fr_FR";
-		document.head.appendChild(meta);
-		expect(detectMetadataLanguage(document).language).toBe("french");
-	});
-
-	it("returns null for unsupported metadata", () => {
-		document.documentElement.lang = "ja-JP";
-		expect(detectMetadataLanguage(document)).toBe(null);
-	});
-
-	it("does not throw for missing or partial documents", () => {
-		expect(detectMetadataLanguage(null)).toBe(null);
-		expect(detectMetadataLanguage({})).toBe(null);
-		expect(detectMetadataLanguage({ documentElement: {} })).toBe(null);
-	});
-
-	it("does not throw when no global document is available", () => {
-		const originalDocument = globalThis.document;
-		vi.stubGlobal("document", undefined);
-		try {
-			expect(detectMetadataLanguage()).toBe(null);
-		} finally {
-			vi.stubGlobal("document", originalDocument);
-		}
-	});
+it('uses confident article text instead of misleading metadata or old preferences', async () => {
+  document.documentElement.lang = 'en-US';
+  chrome.storage.local.get.mockResolvedValue({
+    'pocket-speechify-speech-selection': { selectedLanguage: 'german' },
+    'pocket-speechify-language-overrides': { 'example.com': 'spanish' },
+  });
+  chrome.runtime.sendMessage.mockResolvedValue({ isReliable: true, languages: [{ language: 'fr', percentage: 92 }, { language: 'en', percentage: 8 }] });
+  expect(await resolvePageLanguage('https://example.com', document, 'Bonjour. '.repeat(100)))
+    .toMatchObject({ activeLanguage: 'french', detectedLanguage: 'french', languageSource: 'text' });
 });
 
-describe("loadLanguageOverrides", () => {
-	it("returns empty overrides when chrome storage is missing", async () => {
-		delete globalThis.chrome;
-		await expect(loadLanguageOverrides()).resolves.toEqual({});
-	});
-
-	it("returns empty overrides when local storage is unavailable", async () => {
-		globalThis.chrome = { storage: {} };
-		await expect(loadLanguageOverrides()).resolves.toEqual({});
-	});
-
-	it("returns empty overrides when storage get rejects", async () => {
-		chrome.storage.local.get.mockRejectedValue(new Error("storage failed"));
-		await expect(loadLanguageOverrides()).resolves.toEqual({});
-	});
-
-	it("returns empty overrides for corrupt stored override shapes", async () => {
-		for (const storedValue of [null, "spanish", ["spanish"]]) {
-			chrome.storage.local.get.mockResolvedValueOnce({
-				[LANGUAGE_OVERRIDES_KEY]: storedValue,
-			});
-			await expect(loadLanguageOverrides()).resolves.toEqual({});
-		}
-	});
-
-	it("filters unsupported languages and empty site keys from stored overrides", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			[LANGUAGE_OVERRIDES_KEY]: {
-				"": "spanish",
-				"example.com": "klingon",
-				"valid.com": "german",
-			},
-		});
-		await expect(loadLanguageOverrides()).resolves.toEqual({
-			"valid.com": "german",
-		});
-	});
+it.each([
+  { isReliable: false, languages: [{ language: 'fr', percentage: 100 }] },
+  { isReliable: true, languages: [{ language: 'fr', percentage: 79 }, { language: 'en', percentage: 21 }] },
+])('uses metadata for uncertain or mixed detection: %j', async result => {
+  document.documentElement.lang = 'de-DE';
+  chrome.runtime.sendMessage.mockResolvedValue(result);
+  expect(await resolvePageLanguage('https://example.com', document, 'Some content'))
+    .toMatchObject({ activeLanguage: 'german', languageSource: 'metadata' });
 });
 
-describe("resolvePageLanguage", () => {
-	it("restores the exact saved model and voice ahead of metadata and old site overrides", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			"pocket-speechify-speech-selection": {
-				selectedLanguage: "english_2026-09_24l",
-				voiceId: "vera",
-			},
-			[LANGUAGE_OVERRIDES_KEY]: { "example.com": "spanish" },
-		});
-		document.documentElement.lang = "fr-FR";
-		await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
-			selectedLanguage: "english_2026-09_24l",
-			voiceId: "vera",
-			detectedLanguage: "french",
-			languageSource: "preference",
-		});
-	});
-
-	it.each([
-		[0.4, 0.4], [1.7, 1.7], [4.5, 4.5],
-		[undefined, 1], [null, 1], ["1.7", 1], [0.3, 1], [4.6, 1], [NaN, 1], [Infinity, 1],
-	])("restores saved speed %s as %s without losing model or voice", async (speed, expected) => {
-		chrome.storage.local.get.mockResolvedValue({
-			"pocket-speechify-speech-selection": {
-				selectedLanguage: "english_2026-09_24l",
-				voiceId: "vera",
-				speed,
-			},
-		});
-		await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
-			selectedLanguage: "english_2026-09_24l",
-			voiceId: "vera",
-			speed: expected,
-		});
-	});
-
-	it("keeps the saved model but replaces an unavailable voice with its default", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			"pocket-speechify-speech-selection": {
-				selectedLanguage: "french_24l",
-				voiceId: "removed-voice",
-			},
-		});
-		await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
-			selectedLanguage: "french_24l",
-			voiceId: "estelle",
-		});
-	});
-
-	it.each([null, "french", ["french"], { selectedLanguage: "removed-model", voiceId: "vera" }])(
-		"ignores invalid saved selections (%j) without suppressing metadata detection",
-		async selection => {
-			chrome.storage.local.get.mockResolvedValue({ "pocket-speechify-speech-selection": selection });
-			document.documentElement.lang = "de-DE";
-			await expect(resolvePageLanguage("https://example.com", document)).resolves.toMatchObject({
-				selectedLanguage: "german",
-				languageSource: "metadata",
-			});
-		},
-	);
-
-	it("uses domain override before metadata", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			[LANGUAGE_OVERRIDES_KEY]: { "example.com": "spanish" },
-		});
-		document.documentElement.lang = "de-DE";
-		await expect(
-			resolvePageLanguage(new URL("https://news.example.com/story"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "spanish",
-			detectedLanguage: "german",
-			languageSource: "override",
-			siteKey: "example.com",
-		});
-	});
-
-	it("uses metadata if no override exists", async () => {
-		document.documentElement.lang = "it-IT";
-		await expect(
-			resolvePageLanguage(new URL("https://example.com"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "italian",
-			languageSource: "metadata",
-		});
-	});
-
-	it("falls back to English silently", async () => {
-		await expect(
-			resolvePageLanguage(new URL("https://example.com"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "english",
-			detectedLanguage: null,
-			languageSource: "fallback",
-		});
-	});
-
-	it("uses metadata when chrome storage is missing", async () => {
-		delete globalThis.chrome;
-		document.documentElement.lang = "fr-FR";
-		await expect(
-			resolvePageLanguage(new URL("https://example.com"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "french",
-			detectedLanguage: "french",
-			languageSource: "metadata",
-		});
-	});
-
-	it("falls back when chrome storage and metadata are missing", async () => {
-		delete globalThis.chrome;
-		await expect(
-			resolvePageLanguage(new URL("https://example.com"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "english",
-			detectedLanguage: null,
-			languageSource: "fallback",
-		});
-	});
-
-	it("does not throw for null or partial doc/url data", async () => {
-		await expect(resolvePageLanguage(null, null)).resolves.toMatchObject({
-			siteKey: "",
-			selectedLanguage: "english",
-			detectedLanguage: null,
-			languageSource: "fallback",
-		});
-		await expect(resolvePageLanguage({}, {})).resolves.toMatchObject({
-			siteKey: "",
-			selectedLanguage: "english",
-			detectedLanguage: null,
-			languageSource: "fallback",
-		});
-	});
-
-	it("ignores unsupported stored overrides in favor of metadata", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			[LANGUAGE_OVERRIDES_KEY]: { "example.com": "klingon" },
-		});
-		document.documentElement.lang = "de-DE";
-		await expect(
-			resolvePageLanguage(new URL("https://example.com"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "german",
-			detectedLanguage: "german",
-			languageSource: "metadata",
-		});
-	});
-
-	it("ignores unsupported stored overrides in favor of fallback", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			[LANGUAGE_OVERRIDES_KEY]: { "example.com": "klingon" },
-		});
-		await expect(
-			resolvePageLanguage(new URL("https://example.com"), document),
-		).resolves.toMatchObject({
-			selectedLanguage: "english",
-			detectedLanguage: null,
-			languageSource: "fallback",
-		});
-	});
+it('reports unsupported dominant text rather than claiming English was detected', async () => {
+  document.documentElement.lang = 'en';
+  chrome.runtime.sendMessage.mockResolvedValue({ isReliable: true, languages: [{ language: 'ja', percentage: 100 }] });
+  expect(await resolvePageLanguage('https://example.com', document, '日本語の記事'))
+    .toMatchObject({ activeLanguage: 'english', detectedLanguage: null, unsupportedLocale: 'ja', languageSource: 'fallback' });
 });
 
-describe("saveLanguageOverride", () => {
-	it("merges new override into storage", async () => {
-		chrome.storage.local.get.mockResolvedValue({
-			[LANGUAGE_OVERRIDES_KEY]: { "old.com": "german" },
-		});
-		await saveLanguageOverride("example.com", "spanish");
-		expect(chrome.storage.local.set).toHaveBeenCalledWith({
-			[LANGUAGE_OVERRIDES_KEY]: {
-				"old.com": "german",
-				"example.com": "spanish",
-			},
-		});
-	});
+it('uses legacy site choice only when detection is unavailable', async () => {
+  chrome.storage.local.get.mockResolvedValue({ 'pocket-speechify-language-overrides': { 'example.com': 'french_24l' } });
+  expect(await resolvePageLanguage('https://news.example.com', document)).toMatchObject({ activeLanguage: 'french', languageSource: 'override' });
+  document.documentElement.lang = 'it-IT';
+  expect(await resolvePageLanguage('https://news.example.com', document)).toMatchObject({ activeLanguage: 'italian', languageSource: 'metadata' });
+});
 
-	it("does not save empty site keys", async () => {
-		await saveLanguageOverride("", "spanish");
-		await saveLanguageOverride("   ", "spanish");
-		expect(chrome.storage.local.set).not.toHaveBeenCalled();
-	});
+it('falls back safely on unavailable APIs and missing metadata', async () => {
+  chrome.runtime.sendMessage.mockRejectedValue(new Error('worker unavailable'));
+  chrome.storage.local.get.mockRejectedValue(new Error('storage unavailable'));
+  expect(await resolvePageLanguage(null, null, 'Hello')).toMatchObject({ activeLanguage: 'english', languageSource: 'fallback' });
+  document.documentElement.lang = 'fr';
+  expect(await resolvePageLanguage(null, document, 'Bonjour')).toMatchObject({ activeLanguage: 'french', languageSource: 'metadata' });
+});
 
-	it("does not save unsupported languages", async () => {
-		await saveLanguageOverride("example.com", "klingon");
-		expect(chrome.storage.local.set).not.toHaveBeenCalled();
-	});
+it('bounds text sent for detection and does not send it to an audio context', async () => {
+  await resolvePageLanguage(null, document, 'x'.repeat(30000));
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'speech-detect-language', text: 'x'.repeat(12000) });
+});
+
+it('uses registrable site keys including private domains', () => {
+  expect(getSiteLanguageKey('news.example.co.uk')).toBe('example.co.uk');
+  expect(getSiteLanguageKey('foo.github.io')).toBe('foo.github.io');
+  expect(getSiteLanguageKey('localhost')).toBe('localhost');
 });

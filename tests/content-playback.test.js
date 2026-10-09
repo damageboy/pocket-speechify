@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { createSpeechProfileStore } from '../src/speech-preferences.js';
 
 // Observe the entrypoint's UI contract; panels, extraction, state, RemoteTTS
 // and highlighting remain real. Audio messages stand in for the extension host.
@@ -54,6 +55,12 @@ beforeEach(async () => {
       set: vi.fn(async values => { Object.assign(stored, structuredClone(values)); }),
     } },
   });
+  const profiles = createSpeechProfileStore(chrome.storage.local);
+  chrome.runtime.sendMessage.mockImplementation(async msg => {
+    if (msg.type === 'speech-detect-language') return { isReliable: false, languages: [] };
+    if (msg.type === 'speech-profile-get') return profiles.get(msg.language);
+    if (msg.type === 'speech-profile-update') return profiles.update(msg.language, msg.patch);
+  });
   await loadPage();
 });
 
@@ -65,9 +72,9 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it('restores a chosen model and voice on reload and on another site, including the first playback request', async () => {
+it('restores an English profile on English pages without overriding French detection', async () => {
   ui.state.dispatch({ panelOpen: 'voice' });
-  const select = ui.shadow.querySelector('.language-selector');
+  const select = ui.shadow.querySelector('.model-selector');
   select.value = 'english_2026-09_24l';
   select.dispatchEvent(new Event('change'));
   await refresh();
@@ -75,19 +82,24 @@ it('restores a chosen model and voice on reload and on another site, including t
   await refresh();
 
   for (const url of ['https://example.com/article', 'https://another.org/story']) {
-    await loadPage(url, 'fr-FR');
+    await loadPage(url, 'en-US');
     ui.state.dispatch({ panelOpen: 'voice' });
-    expect(ui.shadow.querySelector('.language-selector').value).toBe('english_2026-09_24l');
+    expect(ui.shadow.querySelector('.language-selector').value).toBe('english');
+    expect(ui.shadow.querySelector('.model-selector').value).toBe('english_2026-09_24l');
     expect(ui.shadow.querySelector('.voice-item.selected .voice-name').textContent).toBe('Vera');
-    ui.actions.play();
+    await ui.actions.play();
     expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera' });
   }
+  await loadPage('https://another.org/french', 'fr-FR');
+  await ui.actions.play();
+  expect(request()).toMatchObject({ language: 'french', voiceId: 'estelle', speed: 1 });
 });
 
 it('persists a model change even without a subsequent voice click', async () => {
-  await ui.actions.setLanguage('french_24l');
-  await loadPage('https://another.org/story', 'en-US');
-  ui.actions.play();
+  await ui.actions.setLanguage('french');
+  await ui.actions.setModel('french_24l');
+  await loadPage('https://another.org/story', 'fr-FR');
+  await ui.actions.play();
   expect(request()).toMatchObject({ language: 'french_24l', voiceId: 'estelle' });
 });
 
@@ -103,41 +115,41 @@ it('restores a speed-only change in the controls and first playback after reload
     ui.state.dispatch({ panelOpen: 'speed' });
     expect(ui.shadow.querySelector('.speed-slider').value).toBe('1.7');
     expect(ui.shadow.querySelector('.speed-value').textContent).toBe('1.7x');
-    ui.actions.play();
+    await ui.actions.play();
     expect(request().speed).toBe(1.7);
   }
 });
 
 it('preserves saved speed through model and voice changes and persists later speed changes', async () => {
   await ui.actions.setSpeed(0.8);
-  await ui.actions.setLanguage('english_2026-09_24l');
+  await ui.actions.setModel('english_2026-09_24l');
   await loadPage();
   expect(ui.state.get().speed).toBe(0.8);
   await ui.actions.setVoice('vera');
   await loadPage();
-  ui.actions.play();
+  await ui.actions.play();
   expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera', speed: 0.8 });
 
   await ui.actions.setSpeed(2.3);
   await loadPage();
-  ui.actions.play();
+  await ui.actions.play();
   expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera', speed: 2.3 });
 });
 
-it('persists an explicit click on the already selected voice without changing the model first', async () => {
+it('does not let an explicit default voice click force the language of other pages', async () => {
   ui.state.dispatch({ panelOpen: 'voice' });
   ui.shadow.querySelector('.voice-item.selected').click();
   await refresh();
   await loadPage('https://another.org/story', 'de-DE');
-  ui.actions.play();
-  expect(request()).toMatchObject({ language: 'english', voiceId: 'alba' });
+  await ui.actions.play();
+  expect(request()).toMatchObject({ language: 'german', voiceId: 'juergen' });
 });
 
 it('does not save detected defaults just because a page initializes', async () => {
   await loadPage('https://another.org/story', 'fr-FR');
-  expect(ui.state.get().selectedLanguage).toBe('french');
+  expect(ui.state.get().selectedModelId).toBe('french');
   expect(chrome.storage.local.set).not.toHaveBeenCalled();
-  ui.actions.play();
+  await ui.actions.play();
   expect(request().speed).toBe(1);
 });
 
@@ -145,10 +157,11 @@ it('still changes the model and voice when storage writes fail', async () => {
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     chrome.storage.local.set.mockRejectedValue(new Error('storage failed'));
-    await ui.actions.setLanguage('french_24l');
+    await ui.actions.setLanguage('french');
+    await ui.actions.setModel('french_24l');
     [...ui.shadow.querySelectorAll('.voice-item')].find(item => item.querySelector('.voice-name').textContent === 'Marius').click();
     await refresh();
-    ui.actions.play();
+    await ui.actions.play();
     expect(request()).toMatchObject({ language: 'french_24l', voiceId: 'marius' });
     expect(warning).toHaveBeenCalled();
   } finally {
@@ -156,8 +169,8 @@ it('still changes the model and voice when storage writes fail', async () => {
   }
 });
 
-it('records only processed engine submissions, not original sentences or stale generations', () => {
-  ui.actions.play();
+it('records only processed engine submissions, not original sentences or stale generations', async () => {
+  await ui.actions.play();
   const owner = request();
   const updates = [];
   ui.state.subscribe((current, prev) => {
@@ -175,7 +188,7 @@ it('records only processed engine submissions, not original sentences or stale g
 });
 
 it('keeps a paused position and progress when content is inserted before it', async () => {
-  ui.actions.play();
+  await ui.actions.play();
   deliver('tts-word', { paragraphIndex: 1, wordIndex: 4 });
   ui.actions.pause();
   const progress = ui.state.get().progress;
@@ -186,7 +199,7 @@ it('keeps a paused position and progress when content is inserted before it', as
 });
 
 it.each(['first', 'second'])('cancels when the %s paragraph in the remaining queue changes', async id => {
-  ui.actions.play();
+  await ui.actions.play();
   const old = request();
   deliver('tts-word', { paragraphIndex: 0, wordIndex: 1 });
   document.getElementById(id).textContent = 'Changed article text.';
@@ -198,7 +211,7 @@ it.each(['first', 'second'])('cancels when the %s paragraph in the remaining que
 });
 
 it('resumes a paused seek at the same paragraph after insertion', async () => {
-  ui.actions.play();
+  await ui.actions.play();
   deliver('tts-word', { paragraphIndex: 0, wordIndex: 1 });
   deliver('tts-sentence-event', { paragraphIndex: 0, sentenceIndex: 0 });
   ui.actions.pause();
@@ -210,7 +223,7 @@ it('resumes a paused seek at the same paragraph after insertion', async () => {
 });
 
 it('rebinds a paused highlight when a framework replaces text nodes without editing text', async () => {
-  ui.actions.play();
+  await ui.actions.play();
   deliver('tts-word', { paragraphIndex: 0, wordIndex: 1 });
   ui.actions.pause();
   const paragraph = document.getElementById('first');
@@ -220,4 +233,93 @@ it('rebinds a paused highlight when a framework replaces text nodes without edit
   const range = [...CSS.highlights.get('pocket-speechify-word')][0];
   expect(range.startContainer).toBe(paragraph.firstChild);
   expect(range.toString()).toBe('words');
+});
+
+it('restores independent language profiles after switches, reloads and new pages', async () => {
+  await ui.actions.setModel('english_2026-09');
+  await ui.actions.setVoice('vera');
+  await ui.actions.setSpeed(1.7);
+  await ui.actions.setLanguage('french');
+  expect(ui.state.get()).toMatchObject({ selectedModelId: 'french', voiceId: 'estelle', speed: 1 });
+  await ui.actions.setModel('french_24l');
+  await ui.actions.setVoice('marius');
+  await ui.actions.setSpeed(0.8);
+  await ui.actions.setLanguage('english');
+  expect(ui.state.get()).toMatchObject({ selectedModelId: 'english_2026-09', voiceId: 'vera', speed: 1.7 });
+  await ui.actions.setLanguage('french');
+  await ui.actions.setSpeed(1.2);
+  await ui.actions.play();
+  expect(request()).toMatchObject({ language: 'french_24l', voiceId: 'marius', speed: 1.2 });
+  await loadPage('https://another.org/en', 'en');
+  await ui.actions.play();
+  expect(request()).toMatchObject({ language: 'english_2026-09', voiceId: 'vera', speed: 1.7 });
+  await loadPage('https://another.org/fr', 'fr');
+  await ui.actions.play();
+  expect(request()).toMatchObject({ language: 'french_24l', voiceId: 'marius', speed: 1.2 });
+});
+
+it('ignores stale detection when a manual language choice supersedes playback preparation', async () => {
+  let finish;
+  chrome.runtime.sendMessage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const playing = ui.actions.play();
+  await Promise.resolve();
+  await ui.actions.setLanguage('german');
+  finish({ isReliable: true, languages: [{ language: 'fr', percentage: 100 }] });
+  await playing;
+  expect(ui.state.get().activeLanguage).toBe('german');
+  expect(request()).toBeUndefined();
+});
+
+it('stop cancels a pending playback start', async () => {
+  let finish;
+  chrome.runtime.sendMessage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const playing = ui.actions.play();
+  await Promise.resolve();
+  ui.actions.stop();
+  finish({ isReliable: false, languages: [] });
+  await playing;
+  expect(request()).toBeUndefined();
+});
+
+it('reads same-language changes from another tab on next playback, not during playback', async () => {
+  await ui.actions.play();
+  await chrome.runtime.sendMessage({ type: 'speech-profile-update', language: 'english', patch: { voiceId: 'vera', speed: 1.9 } });
+  expect(ui.state.get().speed).toBe(1);
+  ui.actions.stop();
+  await ui.actions.play();
+  expect(request()).toMatchObject({ language: 'english', voiceId: 'vera', speed: 1.9 });
+});
+
+it('does not start changed content using a stale detection result', async () => {
+  let finish;
+  chrome.runtime.sendMessage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const playing = ui.actions.play();
+  document.getElementById('first').textContent = 'Un nouvel article français. '.repeat(40);
+  await refresh();
+  finish({ isReliable: true, languages: [{ language: 'en', percentage: 100 }] });
+  await playing;
+  expect(request()).toBeUndefined();
+});
+
+it('keeps the latest manual language when earlier profile loading finishes late', async () => {
+  const send = chrome.runtime.sendMessage.getMockImplementation();
+  let finish;
+  chrome.runtime.sendMessage.mockImplementation(msg => msg.type === 'speech-profile-get' && msg.language === 'french'
+    ? new Promise(resolve => { finish = resolve; }) : send(msg));
+  const french = ui.actions.setLanguage('french');
+  await Promise.resolve();
+  await ui.actions.setLanguage('german');
+  finish({ modelId: 'french_24l', voiceId: 'marius', speed: 0.8 });
+  await french;
+  expect(ui.state.get()).toMatchObject({ activeLanguage: 'german', selectedModelId: 'german', voiceId: 'juergen', speed: 1, speechSettingsLoading: false });
+});
+
+it('scopes download events without an explicit model to the selected model', async () => {
+  await ui.actions.setModel('english_2026-09');
+  await ui.actions.play();
+  const { sessionId, genId } = request();
+  for (const listener of listeners) listener({ type: 'download-progress', asset: 'voice', voiceId: 'vera', percent: 50, sessionId, genId });
+  expect(ui.state.get().voiceCache['english_2026-09:vera']).toBe('downloading');
+  for (const listener of listeners) listener({ type: 'download-complete', asset: 'voice', voiceId: 'vera', sessionId, genId });
+  expect(ui.state.get().voiceCache['english_2026-09:vera']).toBe('cached');
 });

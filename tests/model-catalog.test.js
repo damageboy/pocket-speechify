@@ -20,6 +20,13 @@ const { catalog } = vi.hoisted(() => ({
 vi.mock('../public/wasm/models.json', () => ({ default: catalog }));
 
 describe('upstream model catalog consumption', () => {
+  it('detects a supported base language even when all its models have variant IDs', async () => {
+    const { languageFromLocale } = await import('../src/languages.js');
+    const { normalizeSpeechProfile } = await import('../src/speech-preferences.js');
+    expect(languageFromLocale('en-GB')).toBe('english');
+    expect(normalizeSpeechProfile('english')).toEqual({ modelId: 'english_future', voiceId: 'new_voice', speed: 1 });
+  });
+
   it('accepts new models, defaults, voices, configs and separate asset pins without extension edits', async () => {
     const languages = await import('../src/languages.js');
     const voices = await import('../src/voices.js');

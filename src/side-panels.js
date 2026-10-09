@@ -254,14 +254,13 @@ function createVoicePanel(state, actions) {
   languageSelect.className = 'language-selector';
   languageSelect.setAttribute('aria-label', 'Language');
 
-  LANGUAGES.forEach((language) => {
+  [...new Set(LANGUAGES.map(model => model.language))].forEach((language) => {
     const option = document.createElement('option');
-    option.value = language.id;
-    const previewLabel = language.status === 'preview' ? ' · preview beta' : '';
-    option.textContent = `${language.flag} ${language.description}${previewLabel}`;
+    option.value = language;
+    option.textContent = `${languageFlag(language)} ${voiceDisplayName(language)}`;
     languageSelect.appendChild(option);
   });
-  languageSelect.value = state.get().selectedLanguage;
+  languageSelect.value = state.get().activeLanguage;
   languageSelect.addEventListener('change', () => {
     console.log(`[Pocket Speechify] Language ${languageSelect.value} triggered`);
     actions.setLanguage(languageSelect.value);
@@ -270,6 +269,26 @@ function createVoicePanel(state, actions) {
   languageRow.appendChild(languageLabel);
   languageRow.appendChild(languageSelect);
   panel.appendChild(languageRow);
+
+  const modelRow = document.createElement('div');
+  modelRow.className = 'language-selector-row';
+  const modelLabel = document.createElement('label');
+  modelLabel.className = 'language-selector-label';
+  modelLabel.textContent = 'Model';
+  const modelSelect = document.createElement('select');
+  modelSelect.className = 'model-selector';
+  modelSelect.setAttribute('aria-label', 'Model');
+  modelSelect.addEventListener('change', () => {
+    console.log(`[Pocket Speechify] Model ${modelSelect.value} triggered`);
+    actions.setModel(modelSelect.value);
+  });
+  modelRow.append(modelLabel, modelSelect);
+  panel.appendChild(modelRow);
+
+  const languageStatus = document.createElement('div');
+  languageStatus.className = 'speech-settings-status';
+  languageStatus.setAttribute('role', 'status');
+  panel.appendChild(languageStatus);
 
   // --- Voice list ---
   const listEl = document.createElement('div');
@@ -310,7 +329,7 @@ function createVoicePanel(state, actions) {
       const avatar = renderVoiceAvatar(voice);
 
       const languageId = voice.lang;
-      const cacheKey = state.voiceCacheKey(state.get().selectedLanguage, voice.id);
+      const cacheKey = state.voiceCacheKey(state.get().selectedModelId, voice.id);
       const cacheStatus = state.get().voiceCache[cacheKey] || 'uncached';
       if (cacheStatus === 'downloading') {
         avatar.classList.add('downloading');
@@ -344,18 +363,42 @@ function createVoicePanel(state, actions) {
   }
 
   // Initial render
-  renderList(state.get().voiceId, state.get().selectedLanguage, '');
+  sync(state.get());
 
   // Search input handler
   searchInput.addEventListener('input', () => {
     console.log('[Pocket Speechify] Voice search triggered');
     const current = state.get();
-    renderList(current.voiceId, current.selectedLanguage, searchInput.value);
+    renderList(current.voiceId, current.selectedModelId, searchInput.value);
   });
 
   function sync(s) {
-    languageSelect.value = s.selectedLanguage;
-    renderList(s.voiceId, s.selectedLanguage, searchInput.value);
+    languageSelect.value = s.activeLanguage;
+    modelSelect.replaceChildren(...LANGUAGES.filter(model => model.language === s.activeLanguage).map(model => {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.description}${model.status === 'preview' ? ' · preview beta' : ''}`;
+      return option;
+    }));
+    modelSelect.value = s.selectedModelId;
+    modelSelect.disabled = s.speechSettingsLoading;
+    listEl.inert = s.speechSettingsLoading;
+    if (s.speechSettingsLoading) {
+      languageStatus.textContent = 'Loading language settings…';
+    } else if (s.preferencesError) {
+      languageStatus.textContent = 'Could not save settings. Changes apply to this page only.';
+    } else if (s.languageSource === 'manual') {
+      languageStatus.textContent = 'Language selected for this page.';
+    } else if (s.languageSource === 'fallback') {
+      languageStatus.textContent = s.unsupportedLocale
+        ? `Unsupported language (${s.unsupportedLocale}). Choose a language above.`
+        : 'Language not detected. Using English; you can choose another language.';
+    } else if (s.languageSource === 'override') {
+      languageStatus.textContent = 'Using your previous choice for this site.';
+    } else {
+      languageStatus.textContent = `Automatically detected ${voiceDisplayName(s.activeLanguage)}.`;
+    }
+    renderList(s.voiceId, s.selectedModelId, searchInput.value);
   }
 
   return { panel, sync, resetSearch: () => { searchInput.value = ''; } };
@@ -426,7 +469,9 @@ export function initSidePanels(shadow, state, actions) {
 
     // Keep voice panel in sync while it's open
     if (current.panelOpen === 'voice' &&
-        (current.voiceId !== prev.voiceId || current.selectedLanguage !== prev.selectedLanguage || current.voiceCache !== prev.voiceCache)) {
+        (current.voiceId !== prev.voiceId || current.selectedModelId !== prev.selectedModelId || current.voiceCache !== prev.voiceCache ||
+         current.languageSource !== prev.languageSource || current.unsupportedLocale !== prev.unsupportedLocale ||
+         current.speechSettingsLoading !== prev.speechSettingsLoading || current.preferencesError !== prev.preferencesError)) {
       syncVoice(current);
     }
   });

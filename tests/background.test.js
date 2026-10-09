@@ -108,3 +108,27 @@ it('returns asynchronous forwarding failures to the original identity', async ()
   await vi.waitFor(() => expect(chrome.tabs.sendMessage).toHaveBeenCalled());
   expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(1, expect.objectContaining({ sessionId: 'A', genId: 2, fatal: true }));
 });
+
+it('answers profile patches from different tabs without creating an offscreen document', async () => {
+  const stored = {};
+  chrome.storage.local.get.mockImplementation(async keys => Object.fromEntries(keys.map(key => [key, stored[key]])));
+  chrome.storage.local.set = async values => Object.assign(stored, values);
+  const request = (language, patch, tabId) => new Promise(resolve => {
+    expect(receive({ type: 'speech-profile-update', language, patch }, { tab: { id: tabId } }, resolve)).toBe(true);
+  });
+  await Promise.all([request('english', { speed: 1.7 }, 1), request('english', { voiceId: 'vera' }, 2), request('french', { speed: 0.8 }, 3)]);
+  expect(stored['pocket-speechify-speech-profile-v1:english']).toEqual({ modelId: 'english', voiceId: 'vera', speed: 1.7 });
+  expect(stored['pocket-speechify-speech-profile-v1:french'].speed).toBe(0.8);
+  expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
+});
+
+it('uses browser text detection and returns failures without forwarding them to audio', async () => {
+  chrome.i18n = { detectLanguage: vi.fn(async () => ({ isReliable: true, languages: [{ language: 'fr', percentage: 100 }] })) };
+  const request = () => new Promise(resolve => {
+    expect(receive({ type: 'speech-detect-language', text: 'Bonjour' }, { tab: { id: 1 } }, resolve)).toBe(true);
+  });
+  expect(await request()).toEqual({ isReliable: true, languages: [{ language: 'fr', percentage: 100 }] });
+  chrome.i18n.detectLanguage.mockRejectedValue(new Error('unavailable'));
+  expect(await request()).toMatchObject({ error: 'Error: unavailable' });
+  expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
+});

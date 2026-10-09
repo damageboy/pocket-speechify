@@ -25,7 +25,8 @@ describe("createState", () => {
 		expect(s.progress).toEqual({ totalSec: 0, remainingSec: 0, percent: 0 });
 		expect(s.modelCached).toBe(false);
 		expect(s.downloadProgress).toBeNull();
-		expect(s.selectedLanguage).toBe(DEFAULT_LANGUAGE_ID);
+		expect(s.selectedModelId).toBe(DEFAULT_LANGUAGE_ID);
+		expect(s.activeLanguage).toBe("english");
 		expect(s.detectedLanguage).toBeNull();
 		expect(s.languageSource).toBe("fallback");
 		expect(s.voiceId).toBe(getDefaultVoiceForLanguage(DEFAULT_LANGUAGE_ID));
@@ -33,12 +34,13 @@ describe("createState", () => {
 
 	it("initializes language state", () => {
 		const state = createState({
-			selectedLanguage: "german",
+			selectedModelId: "german_24l",
 			detectedLanguage: "german",
 			languageSource: "metadata",
 		});
 		expect(state.get()).toMatchObject({
-			selectedLanguage: "german",
+			selectedModelId: "german_24l",
+			activeLanguage: "german",
 			detectedLanguage: "german",
 			languageSource: "metadata",
 			voiceId: getDefaultVoiceForLanguage("german"),

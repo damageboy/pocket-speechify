@@ -3,6 +3,7 @@ import { EMPTY_PROGRESS } from "./playback-progress.js";
 import {
 	DEFAULT_LANGUAGE_ID,
 	getDefaultVoiceForLanguage,
+	getLanguage,
 } from "./languages.js";
 
 function voiceCacheKey(languageId, voiceId) {
@@ -31,9 +32,13 @@ const INITIAL_STATE = {
 	currentSentenceIndex: null,
 	currentWordIndex: null,
 	speed: 1.0,
-	selectedLanguage: DEFAULT_LANGUAGE_ID,
+	selectedModelId: DEFAULT_LANGUAGE_ID,
+	activeLanguage: getLanguage(DEFAULT_LANGUAGE_ID).language,
 	detectedLanguage: null,
+	unsupportedLocale: null,
 	languageSource: "fallback",
+	preferencesError: false,
+	speechSettingsLoading: false,
 	siteKey: "",
 	voiceId: DEFAULT_VOICE_ID,
 	panelOpen: null,
@@ -49,14 +54,15 @@ const INITIAL_STATE = {
 export function createState(initialPatch = {}) {
 	const bus = new EventTarget();
 	const initialLanguage =
-		initialPatch.selectedLanguage || INITIAL_STATE.selectedLanguage;
+		initialPatch.selectedModelId || INITIAL_STATE.selectedModelId;
 	const initialVoice =
 		initialPatch.voiceId || getDefaultVoiceForLanguage(initialLanguage);
 	const initialState = {
 		...INITIAL_STATE,
 		ttsHistory: [],
+		activeLanguage: getLanguage(initialLanguage).language,
 		...initialPatch,
-		selectedLanguage: initialLanguage,
+		selectedModelId: initialLanguage,
 		voiceId: initialVoice,
 		voiceCache: buildEmptyVoiceCache(),
 	};

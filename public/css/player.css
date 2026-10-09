@@ -533,6 +533,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin: 0 16px 12px;
+  flex-shrink: 0;
 }
 
 .language-selector-label {
@@ -541,14 +543,22 @@
   font-weight: 700;
 }
 
-.language-selector {
+.language-selector,
+.model-selector {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--bg-divider);
   border-radius: 8px;
   background: var(--bg-primary-dark);
   color: var(--text-primary);
   padding: 8px 10px;
   font: 13px system-ui, sans-serif;
+}
+
+.speech-settings-status {
+  margin: 0 16px 12px;
+  color: var(--text-secondary);
+  font: 12px/1.4 system-ui, sans-serif;
 }
 
 /* ============================================================
