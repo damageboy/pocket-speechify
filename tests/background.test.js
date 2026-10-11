@@ -1,7 +1,7 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { DEFAULT_TEXT_RULES, TEXT_RULES_KEY } from '../src/text-rules.js';
 
-let receive;
+let receive, tabRemoved, tabUpdated;
 beforeEach(async () => {
   vi.resetModules();
   vi.stubGlobal('chrome', {
@@ -12,7 +12,12 @@ beforeEach(async () => {
       sendMessage: vi.fn(async () => {}),
     },
     offscreen: { createDocument: vi.fn(async () => {}) },
-    tabs: { sendMessage: vi.fn(async () => {}) },
+    tabs: {
+      sendMessage: vi.fn(async () => {}),
+      get: vi.fn(async () => ({ id: 1 })),
+      onRemoved: { addListener: fn => { tabRemoved = fn; } },
+      onUpdated: { addListener: fn => { tabUpdated = fn; } },
+    },
     action: { onClicked: { addListener() {} } },
   });
   const { default: background } = await import('../entrypoints/background.js');
@@ -107,6 +112,37 @@ it('returns asynchronous forwarding failures to the original identity', async ()
   receive({ type: 'tts-play-paragraph', sessionId: 'A', genId: 2 }, { tab: { id: 1 } });
   await vi.waitFor(() => expect(chrome.tabs.sendMessage).toHaveBeenCalled());
   expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(1, expect.objectContaining({ sessionId: 'A', genId: 2, fatal: true }));
+});
+
+it('cancels the owning tab playback when that tab is closed, navigated, or discarded', async () => {
+  tabRemoved(1);
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+    { type: 'tts-cancel-tab', tabId: 1, source: 'service-worker' }));
+  chrome.runtime.sendMessage.mockClear();
+  tabUpdated(2, { status: 'loading' });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+    { type: 'tts-cancel-tab', tabId: 2, source: 'service-worker' }));
+  chrome.runtime.sendMessage.mockClear();
+  tabUpdated(3, { discarded: true });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+    { type: 'tts-cancel-tab', tabId: 3, source: 'service-worker' }));
+});
+
+it('does not create an offscreen document just to cancel a closed tab', async () => {
+  chrome.runtime.getContexts.mockResolvedValue([]);
+  tabRemoved(7);
+  await vi.waitFor(() => expect(chrome.runtime.getContexts).toHaveBeenCalled());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(chrome.offscreen.createDocument).not.toHaveBeenCalled();
+  expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it('drops a play from a tab that no longer exists', async () => {
+  chrome.tabs.get.mockRejectedValueOnce(new Error('No tab with id: 1'));
+  receive({ type: 'tts-play-paragraph', sessionId: 'A', genId: 2 }, { tab: { id: 1 } });
+  await vi.waitFor(() => expect(chrome.tabs.get).toHaveBeenCalledWith(1));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
 });
 
 it('answers profile patches from different tabs without creating an offscreen document', async () => {

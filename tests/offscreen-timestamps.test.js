@@ -12,13 +12,14 @@ vi.mock('../src/stretch-processor.js', () => ({
   }),
 }));
 
-let receive, messages, workers, contexts;
+let receive, messages, workers, contexts, deferLoadReplies;
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
   messages = [];
   workers = [];
   contexts = [];
+  deferLoadReplies = false;
   // Chrome offscreen documents expose runtime, but not storage or other extension APIs.
   vi.stubGlobal('browser', { runtime: {
     onMessage: { addListener: fn => { receive = fn; } },
@@ -42,8 +43,11 @@ beforeEach(async () => {
     constructor() { super(); workers.push(this); }
     postMessage(msg) {
       this.sent.push(msg);
-      if (msg.type === 'load-model' || msg.type === 'load-voice') {
-        queueMicrotask(() => this.emit({ type: msg.type === 'load-model' ? 'model-ready' : 'voice-ready' }));
+      if (!deferLoadReplies && (msg.type === 'load-model' || msg.type === 'load-voice')) {
+        queueMicrotask(() => this.emit({
+          type: msg.type === 'load-model' ? 'model-ready' : 'voice-ready',
+          requestId: msg.requestId,
+        }));
       }
     }
     emit(data) {
@@ -238,7 +242,9 @@ it.each([200, 206])('resumes download with HTTP %i and caches exactly the final 
   const url = k => `https://pocket-tts-cache.local/${k}`;
   const entries = new Map([
     [url(key + '.partial'), new Uint8Array([1, 2]).buffer],
-    [url(key + '.partial-meta'), new TextEncoder().encode('{"received":2}').buffer],
+    // A stale length record (a torn write or an older format) must be ignored:
+    // the partial body's own length is the resume offset.
+    [url(key + '.partial-meta'), new TextEncoder().encode('{"received":1}').buffer],
   ]);
   let modelMissing = true;
   let finishDownload;
@@ -274,10 +280,162 @@ it.each([200, 206])('resumes download with HTTP %i and caches exactly the final 
   expect(fetch).toHaveBeenCalledWith(expect.any(String), { headers: { Range: 'bytes=2-' } });
   expect([...new Uint8Array(entries.get(url(key)))]).toEqual([1, 2, 3, 4]);
   expect(entries.has(url(key + '.partial'))).toBe(false);
-  expect(entries.has(url(key + '.partial-meta'))).toBe(false);
   expect(messages.find(m => m.type === 'download-progress')).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, percent: 100 });
   expect(messages.find(m => m.type === 'download-complete')).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7 });
   expect(next.ctx.state).toBe('running');
+});
+
+it('restarts from zero when the stored partial cannot be resumed', async () => {
+  const { getModelCacheKey } = await import('../src/languages.js');
+  const key = getModelCacheKey('english');
+  const url = k => `https://pocket-tts-cache.local/${k}`;
+  const entries = new Map([[url(key + '.partial'), new Uint8Array([9]).buffer]]);
+  let fetchCount = 0;
+  caches.open = async () => ({
+    match: async k => {
+      if (k === url(key)) return null;
+      if (entries.has(k)) return { arrayBuffer: async () => entries.get(k) };
+      if (k.endsWith('.partial') || k.endsWith('.partial-meta')) return null;
+      return { arrayBuffer: async () => new ArrayBuffer(1) };
+    },
+    put: async (req, resp) => { entries.set(req.url, await resp.arrayBuffer()); },
+    delete: async k => { entries.delete(k); },
+  });
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    fetchCount++;
+    if (fetchCount === 1) {
+      return { ok: false, status: 416, statusText: 'Range Not Satisfiable', headers: new Headers(), body: null };
+    }
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    return {
+      ok: true, status: 200, headers: new Headers({ 'content-length': '4' }),
+      body: { getReader: () => {
+        let read = false;
+        return { read: async () => read ? { done: true } : (read = true, { done: false, value: bytes }) };
+      } },
+    };
+  }));
+  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9, sessionId: 'A', genId: 7,
+    startPlayback: true, paragraphText: 'Hello.', speed: 1, textRules: [] });
+  await vi.advanceTimersByTimeAsync(25);
+  expect(fetch.mock.calls[0][1]).toEqual({ headers: { Range: 'bytes=1-' } });
+  expect(fetch.mock.calls[1][1]).toEqual({ headers: {} });
+  expect([...new Uint8Array(entries.get(url(key)))]).toEqual([1, 2, 3, 4]);
+  expect(entries.has(url(key + '.partial'))).toBe(false);
+});
+
+it('shares one in-flight download between concurrent requests for the same asset', async () => {
+  const { getModelCacheKey } = await import('../src/languages.js');
+  const key = getModelCacheKey('english');
+  const url = k => `https://pocket-tts-cache.local/${k}`;
+  let modelCached = false;
+  let finishFetch;
+  caches.open = async () => ({
+    match: async k => {
+      if (k === url(key)) return modelCached ? { arrayBuffer: async () => new ArrayBuffer(4) } : null;
+      if (k.endsWith('.partial') || k.endsWith('.partial-meta')) return null;
+      return { arrayBuffer: async () => new ArrayBuffer(1) };
+    },
+    put: async req => { if (req.url === url(key)) modelCached = true; },
+    delete: async () => {},
+  });
+  vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => {
+    finishFetch = () => resolve({
+      ok: true, status: 200, headers: new Headers({ 'content-length': '4' }),
+      body: { getReader: () => {
+        let read = false;
+        return { read: async () => read ? { done: true } : (read = true, { done: false, value: new Uint8Array([1, 2, 3, 4]) }) };
+      } },
+    });
+  })));
+  const playFrom = (tabId, sessionId) => ({
+    source: 'service-worker', type: 'tts-play-paragraph', tabId, sessionId, genId: 7,
+    startPlayback: true, paragraphText: 'Hello.', speed: 1, textRules: [],
+  });
+  receive(playFrom(9, 'A'));
+  await vi.advanceTimersByTimeAsync(0);
+  receive(playFrom(10, 'B'));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(finishFetch).toBeTypeOf('function');
+  finishFetch();
+  await vi.advanceTimersByTimeAsync(25);
+  expect(modelCached).toBe(true);
+});
+
+it('cancels playback only for the tab that owned it', async () => {
+  const { worker, genId, ctx } = await play();
+  receive({ source: 'service-worker', type: 'tts-cancel-tab', tabId: 10 });
+  expect(ctx.state).toBe('running');
+  receive({ source: 'service-worker', type: 'tts-cancel-tab', tabId: 9 });
+  expect(ctx.state).toBe('closed');
+  const count = wordMessages().length;
+  worker.emit({ type: 'chunk', genId, data: new Float32Array(24000) });
+  worker.emit({ type: 'done', genId });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(wordMessages()).toHaveLength(count);
+  expect(messages.some(m => m.type === 'tts-paragraph-done')).toBe(false);
+});
+
+it('reports a worker failure during loading as a fatal error without waiting for a timeout', async () => {
+  deferLoadReplies = true;
+  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9, sessionId: 'A', genId: 7,
+    startPlayback: true, paragraphText: 'Hello.', speed: 1, textRules: [] });
+  await vi.advanceTimersByTimeAsync(0);
+  const worker = workers.at(-1);
+  expect(worker.sent.some(m => m.type === 'load-model')).toBe(true);
+  worker.dispatchEvent(Object.assign(new Event('error'), { message: 'wasm aborted' }));
+  await vi.advanceTimersByTimeAsync(0);
+  const done = messages.find(m => m.type === 'tts-paragraph-done');
+  expect(done).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
+  expect(done.error).toContain('TTS worker failed');
+  expect(done.error).toContain('wasm aborted');
+});
+
+it('reports an unresponsive worker load as a fatal error after the timeout', async () => {
+  deferLoadReplies = true;
+  receive({ source: 'service-worker', type: 'tts-play-paragraph', tabId: 9, sessionId: 'A', genId: 7,
+    startPlayback: true, paragraphText: 'Hello.', speed: 1, textRules: [] });
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(30000);
+  const done = messages.find(m => m.type === 'tts-paragraph-done');
+  expect(done).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
+  expect(done.error).toContain('did not respond');
+});
+
+it('reports a worker crash during generation and cancels the paragraph', async () => {
+  const { worker, genId, ctx } = await play();
+  worker.emit({ type: 'chunk', genId, data: new Float32Array(24000) });
+  await vi.advanceTimersByTimeAsync(25);
+  worker.dispatchEvent(Object.assign(new Event('error'), { message: 'worker crashed' }));
+  await vi.advanceTimersByTimeAsync(25);
+  const done = messages.find(m => m.type === 'tts-paragraph-done');
+  expect(done).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
+  expect(done.error).toContain('worker crashed');
+  expect(ctx.state).toBe('closed');
+  const count = messages.filter(m => m.type === 'tts-paragraph-done').length;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(messages.filter(m => m.type === 'tts-paragraph-done')).toHaveLength(count);
+});
+
+it('ignores a stale generation error while a new worker load is pending', async () => {
+  deferLoadReplies = true;
+  const playFrom = (tabId, sessionId, genId) => receive({ source: 'service-worker', type: 'tts-play-paragraph',
+    tabId, sessionId, genId, startPlayback: true, paragraphText: 'Hello.', speed: 1, textRules: [] });
+  playFrom(9, 'A', 7);
+  await vi.advanceTimersByTimeAsync(0);
+  playFrom(10, 'B', 8);
+  await vi.advanceTimersByTimeAsync(0);
+  const worker = workers.at(-1);
+  const loadRequest = worker.sent.find(m => m.type === 'load-model');
+  expect(loadRequest).toBeDefined();
+  // A stale generation error must not settle the pending model load.
+  worker.emit({ type: 'error', genId: 1, error: 'old generation failed' });
+  deferLoadReplies = false;
+  worker.emit({ type: 'model-ready', requestId: loadRequest.requestId });
+  await vi.advanceTimersByTimeAsync(25);
+  expect(worker.sent.findLast(m => m.type === 'generate')).toBeDefined();
+  expect(messages.some(m => m.type === 'tts-paragraph-done' && m.fatal && m.tabId === 10)).toBe(false);
 });
 
 it('rejects a late old paragraph continuation without reclaiming the new owner', async () => {

@@ -25,13 +25,13 @@ it('loads catalog configs and JSON tokenizers as public non-cloning models', asy
   `);
   await import('../public/tts-worker.js');
   await self.onmessage({ data: {
-    type: 'load-model', language: 'english_2026-09', wasmJsUrl: moduleUrl,
+    type: 'load-model', language: 'english_2026-09', wasmJsUrl: moduleUrl, requestId: 42,
     configData: new TextEncoder().encode('sampler: upstream\n').buffer,
     modelData: new Uint8Array([17]).buffer,
     tokenizerData: new TextEncoder().encode('{}').buffer,
   } });
   expect(messages.filter(message => message.type !== 'diag')).toEqual([
-    { type: 'model-ready', sampleRate: 24000, language: 'english_2026-09' },
+    { type: 'model-ready', sampleRate: 24000, language: 'english_2026-09', requestId: 42 },
   ]);
 });
 

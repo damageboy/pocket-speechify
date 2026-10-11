@@ -107,83 +107,108 @@ async function deleteCache(key) {
 }
 
 // --- Resumable download with progress ---
+//
+// Downloads are single-flight per cache key, and the partial body is the only
+// resume state: its byte length is the resume offset. A separate length record
+// can be torn from the body by a crash or a concurrent writer, which corrupts
+// the asset or permanently stalls every later resume.
 
-async function downloadWithProgress(url, cacheKey, asset, voiceId, language, owner) {
-  const partialKey = cacheKey + '.partial';
-  const metaKey = cacheKey + '.partial-meta';
+const inFlightDownloads = new Map(); // cacheKey -> { promise, waiters: Set<owner> }
+let cacheEpoch = 0;
 
-  let startByte = 0;
-  const existingChunks = [];
-  const metaResp = await getCached(metaKey);
-  if (metaResp) {
-    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(metaResp)));
-    startByte = meta.received;
-    const partialData = await getCached(partialKey);
-    if (partialData) {
-      existingChunks.push(new Uint8Array(partialData));
-    } else {
-      startByte = 0;
-    }
-  }
+function parseContentRange(resp) {
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/.exec((resp.headers.get('content-range') || '').trim());
+  if (!match) return null;
+  return { start: Number(match[1]), total: match[3] === '*' ? null : Number(match[3]) };
+}
 
+async function openDownload(url, startByte) {
   const headers = {};
   if (startByte > 0) headers['Range'] = `bytes=${startByte}-`;
+  return fetch(url, { headers });
+}
 
-  const resp = await fetch(url, { headers });
+async function downloadWithProgress({ url, cacheKey, asset, voiceId, language, flight, epoch }) {
+  const partialKey = `${cacheKey}.partial`;
+  const broadcast = (msg) => {
+    for (const waiter of flight.waiters) sendToServiceWorker(msg, waiter);
+  };
+
+  const existing = await getCached(partialKey);
+  let startByte = existing ? existing.byteLength : 0;
+  let resp = await openDownload(url, startByte);
+
+  // A stored partial can be unusable (the server lost the file, or a previous
+  // attempt left bytes the server will not range over). Restart once from zero.
+  const storedRange = parseContentRange(resp);
+  if (resp.status === 416 || (resp.status === 206 && storedRange && storedRange.start !== startByte)) {
+    await deleteCache(partialKey);
+    startByte = 0;
+    resp = await openDownload(url, 0);
+    const restartedRange = parseContentRange(resp);
+    if (resp.status === 416 || (resp.status === 206 && restartedRange && restartedRange.start !== 0)) {
+      throw new Error(`Download failed: cannot resume ${url}`);
+    }
+  }
   if (!resp.ok && resp.status !== 206) {
     throw new Error(`Download failed: ${resp.status} ${resp.statusText}`);
   }
 
   // A server may ignore Range and return the entire file. Never prepend the prefix.
-  if (resp.status === 200) {
-    startByte = 0;
-    existingChunks.length = 0;
-  }
+  if (resp.status === 200) startByte = 0;
 
-  const contentLength = startByte + parseInt(resp.headers.get('content-length') || '0', 10);
-  const reader = resp.body.getReader();
-  const chunks = [...existingChunks];
+  const totalBytes = parseContentRange(resp)?.total ??
+    startByte + parseInt(resp.headers.get('content-length') || '0', 10);
+  const chunks = startByte > 0 && existing ? [new Uint8Array(existing)] : [];
   let received = startByte;
+  const reader = resp.body.getReader();
 
   let lastCheckpointBucket = -1;
   let lastProgressBucket = -1;
+
+  const writePartial = async () => {
+    if (cacheEpoch !== epoch) return;
+    await putCache(partialKey, mergeChunks(chunks, received).buffer);
+  };
+
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       chunks.push(value);
       received += value.length;
-      const percent = contentLength > 0 ? Math.round((received / contentLength) * 100) : -1;
+      const percent = totalBytes > 0 ? Math.round((received / totalBytes) * 100) : -1;
 
       const progressBucket = Math.floor(percent / 2);
       if (progressBucket > lastProgressBucket) {
         lastProgressBucket = progressBucket;
-        sendToServiceWorker({ type: 'download-progress', asset, voiceId, language, percent }, owner);
+        broadcast({ type: 'download-progress', asset, voiceId, language, percent });
       }
 
       const checkpointBucket = Math.floor(percent / 10);
       if (checkpointBucket > lastCheckpointBucket) {
         lastCheckpointBucket = checkpointBucket;
-        const partial = mergeChunks(chunks, received);
-        await putCache(partialKey, partial.buffer);
-        await putCache(metaKey, new TextEncoder().encode(JSON.stringify({ received })).buffer);
+        await writePartial();
         logToSW(`[Offscreen] Checkpoint at ${percent}% (${(received / 1024 / 1024).toFixed(1)}MB)`);
       }
     }
   } catch (err) {
-    const partial = mergeChunks(chunks, received);
-    await putCache(partialKey, partial.buffer);
-    await putCache(metaKey, new TextEncoder().encode(JSON.stringify({ received })).buffer);
+    await writePartial().catch(() => {});
     logToSW(`[Offscreen] Download interrupted at ${(received / 1024 / 1024).toFixed(1)}MB. Will resume.`);
     throw err;
   }
 
+  if (totalBytes > 0 && received !== totalBytes) {
+    await writePartial().catch(() => {});
+    throw new Error(`Download incomplete: ${received}/${totalBytes} bytes`);
+  }
+  if (cacheEpoch !== epoch) throw new Error('Cache cleared during download');
+
   const fullBuffer = mergeChunks(chunks, received);
   await putCache(cacheKey, fullBuffer.buffer);
   await deleteCache(partialKey);
-  await deleteCache(metaKey);
   logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''}${language ? ` (${language})` : ''} cached (${(received / 1024 / 1024).toFixed(1)}MB)`);
-  sendToServiceWorker({ type: 'download-complete', asset, voiceId, language }, owner);
+  broadcast({ type: 'download-complete', asset, voiceId, language });
   return fullBuffer.buffer;
 }
 
@@ -363,6 +388,14 @@ function cancelGeneration(internalGen) {
   }
 }
 
+function cancelPlayback(genId) {
+  internalGenCounter++;
+  activeLoadToken++;
+  cancelGeneration(internalGenCounter - 1);
+  if (genId !== undefined) currentGenId = genId;
+  playbackOwner = null;
+}
+
 // --- Message handling ---
 
 browser.runtime.onMessage.addListener((msg) => {
@@ -387,21 +420,28 @@ browser.runtime.onMessage.addListener((msg) => {
       handleResume();
       break;
     case 'tts-cancel':
-      internalGenCounter++;
-      activeLoadToken++;
-      cancelGeneration(internalGenCounter - 1);
-      currentGenId = msg.genId;
-      playbackOwner = null;
+      cancelPlayback(msg.genId);
+      break;
+    case 'tts-cancel-tab':
+      // The tab that owned playback was closed, discarded, or navigated away.
+      if (playbackOwner?.tabId === msg.tabId) cancelPlayback();
       break;
     case 'tts-set-speed':
       handleSetSpeed(msg.speed);
       break;
     case 'tts-clear-cache': {
+      // In-flight downloads check this epoch before writing, so a clear is not
+      // silently undone by a download that finishes after it.
+      cacheEpoch++;
       const clearLoadToken = ++activeLoadToken;
       caches.delete(CACHE_NAME).then(deleted => {
         if (clearLoadToken !== activeLoadToken) return;
         logToSW(`[Offscreen] Cache cleared: ${deleted}`);
-        if (worker) { worker.terminate(); worker = null; }
+        if (worker) {
+          rejectWorkerRequests(worker, new Error('TTS worker terminated by cache clear'));
+          worker.terminate();
+          worker = null;
+        }
         currentLoadedVoiceId = null;
         currentLoadedLanguage = null;
       });
@@ -417,10 +457,28 @@ async function getOrDownloadAsset({ cacheKey, url, asset, voiceId = null, langua
     return cachedData;
   }
 
-  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) not cached, downloading...`);
-  const downloadedData = await downloadWithProgress(url, cacheKey, asset, voiceId, language, owner);
-  logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) download complete`);
-  return downloadedData;
+  let flight = inFlightDownloads.get(cacheKey);
+  if (!flight) {
+    logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) not cached, downloading...`);
+    flight = { waiters: new Set() };
+    flight.promise = downloadWithProgress({
+      url, cacheKey, asset, voiceId, language, flight, epoch: cacheEpoch,
+    }).finally(() => {
+      if (inFlightDownloads.get(cacheKey) === flight) inFlightDownloads.delete(cacheKey);
+    });
+    // A superseded flight can settle with no waiter left to observe it.
+    flight.promise.catch(() => {});
+    inFlightDownloads.set(cacheKey, flight);
+  }
+
+  flight.waiters.add(owner);
+  try {
+    const downloadedData = await flight.promise;
+    logToSW(`[Offscreen] ${asset}${voiceId ? ':' + voiceId : ''} (${language}) download complete`);
+    return downloadedData;
+  } finally {
+    flight.waiters.delete(owner);
+  }
 }
 
 async function loadModelAssets(language, owner) {
@@ -570,7 +628,6 @@ async function handlePlayParagraph(msg) {
 
 async function ensureWorker(modelAssets, voiceData, voiceId, language, requestInternalGen, loadToken) {
   const isCurrent = () => requestInternalGen === internalGenCounter && loadToken === activeLoadToken;
-  const isStaleLoadError = (err) => err?.name === 'StaleWorkerWait';
 
   if (!isCurrent()) return false;
 
@@ -580,29 +637,27 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language, requestIn
     if (!modelAssets) throw new Error(`Missing model assets for language ${language}`);
     const { modelData, tokenizerData, configData } = modelAssets;
     if (!isCurrent()) return false;
-    if (worker) { worker.terminate(); worker = null; }
+    if (worker) {
+      rejectWorkerRequests(worker, new Error('TTS worker replaced'));
+      worker.terminate();
+      worker = null;
+    }
     currentLoadedVoiceId = null;
     currentLoadedLanguage = null;
-    worker = new Worker(browser.runtime.getURL('tts-worker.js'));
-    worker.onmessage = (e) => handleWorkerMessage(e.data);
-    worker.onerror = (e) => {
-      logToSW(`[Offscreen] WORKER ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
+    const workerInstance = new Worker(browser.runtime.getURL('tts-worker.js'));
+    worker = workerInstance;
+    workerInstance.onmessage = (e) => handleWorkerMessage(e.data);
+    workerInstance.onerror = (e) => {
+      const location = e.filename ? ` at ${e.filename}:${e.lineno}` : '';
+      handleWorkerFailure(workerInstance, `${e.message || 'unknown worker error'}${location}`);
     };
     const wasmJsUrl = browser.runtime.getURL('wasm/pocket_tts.js');
     const timestamps = /^timestamp_heads:\s*\[/m.test(buildLanguageConfigYaml(language));
     if (!timestamps) logToSW(`[Offscreen] ${language} has no calibrated timestamp heads; playing without word highlights`);
-    const workerForLoad = worker;
-    workerForLoad.postMessage(
-      { type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language, timestamps },
-      [modelData, tokenizerData, configData],
-    );
-    if (!isCurrent()) return false;
-    try {
-      await waitForWorkerMessage('model-ready', 30000, workerForLoad, isCurrent);
-    } catch (err) {
-      if (isStaleLoadError(err)) return false;
-      throw err;
-    }
+    const workerForLoad = workerInstance;
+    await requestFromWorker(workerForLoad, {
+      type: 'load-model', modelData, tokenizerData, configData, wasmJsUrl, language, timestamps,
+    }, { transfer: [modelData, tokenizerData, configData] });
     if (!isCurrent() || workerForLoad !== worker) return false;
     currentLoadedLanguage = language;
   }
@@ -613,14 +668,7 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language, requestIn
     if (!voiceData) throw new Error(`Missing voice data for ${language}:${voiceId}`);
     const workerForVoice = worker;
     if (!workerForVoice) throw new Error('Worker missing while loading voice');
-    workerForVoice.postMessage({ type: 'load-voice', voiceId, voiceData, language });
-    if (!isCurrent()) return false;
-    try {
-      await waitForWorkerMessage('voice-ready', 30000, workerForVoice, isCurrent);
-    } catch (err) {
-      if (isStaleLoadError(err)) return false;
-      throw err;
-    }
+    await requestFromWorker(workerForVoice, { type: 'load-voice', voiceId, voiceData, language });
     if (!isCurrent() || workerForVoice !== worker) return false;
     currentLoadedVoiceId = voiceId;
   }
@@ -628,77 +676,69 @@ async function ensureWorker(modelAssets, voiceData, voiceId, language, requestIn
   return true;
 }
 
-function waitForWorkerMessage(expectedType, timeoutMs = 30000, workerInstance = worker, isCurrent = () => true) {
+// --- Worker request/response dispatcher ---
+//
+// Load requests are correlated by a request ID echoed from the worker, so an
+// overlapping reply or a stale generation's error cannot settle the wrong
+// request. A worker failure rejects every pending request immediately instead
+// of leaving callers to sit out their timeout.
+
+let nextWorkerRequestId = 1;
+const pendingWorkerRequests = new Map(); // requestId -> { worker, resolve, reject, timer }
+
+function requestFromWorker(workerInstance, message, { timeoutMs = 30000, transfer = [] } = {}) {
+  const requestId = nextWorkerRequestId++;
   return new Promise((resolve, reject) => {
-    const targetWorker = workerInstance;
-    if (!targetWorker) {
-      reject(new Error(`Worker missing while waiting for worker message: ${expectedType}`));
-      return;
-    }
-
-    let settled = false;
-    let timer = null;
-    let staleCheckTimer = null;
-
-    const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      if (staleCheckTimer) clearInterval(staleCheckTimer);
-      targetWorker.removeEventListener('message', handler);
-    };
-
-    const finishResolve = (value) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(value);
-    };
-
-    const finishReject = (err) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err);
-    };
-
-    const currentCheck = () => {
-      try {
-        return isCurrent();
-      } catch (_) {
-        return false;
-      }
-    };
-
-    const finishStale = () => {
-      const err = new Error(`Stale worker wait while waiting for worker message: ${expectedType}`);
-      err.name = 'StaleWorkerWait';
-      finishReject(err);
-    };
-
-    function handler(e) {
-      if (!currentCheck()) {
-        finishStale();
-        return;
-      }
-      if (e.data.type === expectedType) {
-        finishResolve(e.data);
-      } else if (e.data.type === 'error') {
-        finishReject(new Error(e.data.error || 'Worker error during ' + expectedType));
-      }
-    }
-
-    if (!currentCheck()) {
-      finishStale();
-      return;
-    }
-
-    targetWorker.addEventListener('message', handler);
-    timer = setTimeout(() => {
-      finishReject(new Error(`Timeout waiting for worker message: ${expectedType}`));
+    const timer = setTimeout(() => {
+      pendingWorkerRequests.delete(requestId);
+      reject(new Error(`TTS worker did not respond to ${message.type} within ${timeoutMs / 1000}s`));
     }, timeoutMs);
-    staleCheckTimer = setInterval(() => {
-      if (!currentCheck()) finishStale();
-    }, 50);
+    pendingWorkerRequests.set(requestId, { worker: workerInstance, resolve, reject, timer });
+    workerInstance.postMessage({ ...message, requestId }, transfer);
   });
+}
+
+function settleWorkerRequest(msg) {
+  const request = pendingWorkerRequests.get(msg.requestId);
+  if (!request) return false;
+  pendingWorkerRequests.delete(msg.requestId);
+  clearTimeout(request.timer);
+  if (msg.type === 'error') request.reject(new Error(msg.error || 'TTS worker request failed'));
+  else request.resolve(msg);
+  return true;
+}
+
+function rejectWorkerRequests(workerInstance, error) {
+  for (const [requestId, request] of pendingWorkerRequests) {
+    if (request.worker !== workerInstance) continue;
+    pendingWorkerRequests.delete(requestId);
+    clearTimeout(request.timer);
+    request.reject(error);
+  }
+}
+
+function handleWorkerFailure(workerInstance, message) {
+  const error = new Error(`TTS worker failed: ${message}`);
+  logToSW(`[Offscreen] WORKER FAILURE: ${message}`);
+  rejectWorkerRequests(workerInstance, error);
+  try { workerInstance.terminate(); } catch (_) {}
+  if (workerInstance !== worker) return;
+  worker = null;
+  currentLoadedVoiceId = null;
+  currentLoadedLanguage = null;
+  // A generation has no pending request to reject, so surface it directly.
+  if (paragraphDoneResolve) {
+    const owner = playbackOwner;
+    internalGenCounter++;
+    activeLoadToken++;
+    cancelGeneration(internalGenCounter - 1);
+    playbackOwner = null;
+    if (owner) {
+      sendToServiceWorker({
+        type: 'tts-paragraph-done', genId: currentGenId, error: error.message, fatal: true,
+      }, owner);
+    }
+  }
 }
 
 function handleWorkerMessage(msg) {
@@ -707,6 +747,8 @@ function handleWorkerMessage(msg) {
     sendToServiceWorker({ type: 'diag', message: msg.message });
     return;
   }
+  // Load replies carry the request ID they answer; generation messages do not.
+  if (msg.requestId !== undefined && settleWorkerRequest(msg)) return;
   switch (msg.type) {
     case 'words': {
       if (msg.genId !== internalGenCounter) return;

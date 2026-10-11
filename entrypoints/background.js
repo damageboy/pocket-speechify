@@ -7,11 +7,15 @@ export default defineBackground(() => {
   // Preserve command order even when offscreen discovery/creation is asynchronous.
   let forwarding = Promise.resolve();
 
-  async function ensureOffscreenDocument() {
+  async function hasOffscreenDocument() {
     const existingContexts = await chrome.runtime.getContexts({
       contextTypes: ['OFFSCREEN_DOCUMENT'],
     });
-    if (existingContexts.length > 0) return;
+    return existingContexts.length > 0;
+  }
+
+  async function ensureOffscreenDocument() {
+    if (await hasOffscreenDocument()) return;
 
     if (offscreenCreating) {
       await offscreenCreating;
@@ -96,6 +100,12 @@ export default defineBackground(() => {
         // Offscreen documents only expose runtime. Read fresh rules here so
         // settings changes also reach paragraphs from already-open tabs.
         payload.textRules = await loadTextRules(chrome.storage.local);
+        // A tab that closed while its play was in flight must not start audio.
+        const tab = await chrome.tabs.get(tabId).catch(() => null);
+        if (!tab) {
+          console.log('[SW] Dropping play for missing tab', tabId);
+          return;
+        }
       }
       console.log('[SW] Ensuring offscreen document...');
       await ensureOffscreenDocument();
@@ -113,11 +123,36 @@ export default defineBackground(() => {
     }
   }
 
+  // Stop orphan audio when the tab that owns playback disappears. Queued on the
+  // same chain as play/pause, so a close racing a play cannot start after cancel.
+  function cancelTabPlayback(tabId) {
+    forwarding = forwarding
+      .then(async () => {
+        if (!(await hasOffscreenDocument())) return;
+        console.log('[SW] Cancelling playback for tab', tabId);
+        await chrome.runtime.sendMessage({ type: 'tts-cancel-tab', tabId, source: 'service-worker' });
+      })
+      .catch(err => console.warn('[SW] Tab playback cancel failed:', err));
+  }
+
   function sendToOwner(msg) {
     if (msg.tabId == null) return;
     const { source, ...payload } = msg;
     chrome.tabs.sendMessage(msg.tabId, payload).catch(() => {});
   }
+
+  // Tab close, reload, navigation, or discard: unload messaging from the
+  // content script is unreliable, so the service worker owns this signal.
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    console.log('[SW] Tab removed:', tabId);
+    cancelTabPlayback(tabId);
+  });
+
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status !== 'loading' && !changeInfo.discarded) return;
+    console.log('[SW] Tab navigating or discarded:', tabId);
+    cancelTabPlayback(tabId);
+  });
 
   // Toolbar button click: toggle pill player visibility on the active tab
   chrome.action.onClicked.addListener((tab) => {

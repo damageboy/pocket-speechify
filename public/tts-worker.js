@@ -63,10 +63,10 @@ self.onmessage = async (e) => {
         timestamps = msg.timestamps === true;
         diag(`[TTS Worker] Model loaded. is_ready=${model.is_ready()}, sample_rate=${sampleRate}`);
 
-        self.postMessage({ type: 'model-ready', sampleRate, language: msg.language });
+        self.postMessage({ type: 'model-ready', sampleRate, language: msg.language, requestId: msg.requestId });
       } catch (err) {
         diag(`[TTS Worker] load-model ERROR: ${err}`);
-        self.postMessage({ type: 'error', error: String(err) });
+        self.postMessage({ type: 'error', error: String(err), requestId: msg.requestId });
       }
       break;
     }
@@ -78,10 +78,10 @@ self.onmessage = async (e) => {
         // so loading a new voice replaces the previous one.
         model.load_voice_from_safetensors(new Uint8Array(msg.voiceData));
         diag(`[TTS Worker] Voice ${msg.voiceId} loaded`);
-        self.postMessage({ type: 'voice-ready', voiceId: msg.voiceId });
+        self.postMessage({ type: 'voice-ready', voiceId: msg.voiceId, requestId: msg.requestId });
       } catch (err) {
         diag(`[TTS Worker] load-voice ERROR: ${err}`);
-        self.postMessage({ type: 'error', error: String(err) });
+        self.postMessage({ type: 'error', error: String(err), requestId: msg.requestId });
       }
       break;
     }
