@@ -6,6 +6,14 @@ A Chrome extension that replicates the Speechify text-to-speech UI as a lightwei
 
 - **Every user interaction (button click, UI event) MUST have a `console.log` message** for debugging. This applies to all event handlers in pill-player.js, side-panels.js, hover-player.js, and any other UI code. Format: `console.log('[Pocket Speechify] <action> clicked/triggered')`.
 
+## Mandatory Playback Verification
+
+- **After every change, test real playback in Chrome before claiming the work is complete.** Unit tests, mocked Chrome APIs, DOM tests, successful builds, and screenshots are not substitutes for playback verification.
+- Build the current extension, load or reload `.output/chrome-mv3` in Chrome, refresh the test page, and start playback through the actual player UI. Use the real service worker, offscreen document, WASM worker, model/voice assets, and audio pipeline; do not stub downloads, inference, or playback events.
+- Verify that speech audio is generated and playback progresses to completion without errors. Check the page, service-worker, and offscreen consoles plus failed network requests. A moving progress indicator alone does not prove playback works. In a muted/headless browser, inspect real non-silent PCM and audio scheduling/completion, and explicitly report that audible output was not checked.
+- Exercise the behavior changed, not only default playback. For model/voice persistence, select a non-default model and voice, play, reload and play again, then open another tab/page and verify both the restored selections and successful playback. Cover uncached downloads and cached playback when asset loading or model selection is affected; use a disposable test profile rather than clearing the user's caches or settings.
+- If real playback cannot be verified, report the exact blocker and leave playback verification explicitly incomplete. Never call the change fixed solely because tests or the build pass.
+
 ## Build Scripts
 
 ### `scripts/build-wasm.sh`
@@ -40,16 +48,16 @@ There are 4 execution contexts. Each has different API access. **Never assume an
 ### Service Worker (service-worker.js)
 
 - **Runs in:** extension background context
-- **Has access to:** `chrome.runtime`, `chrome.tabs`, `chrome.offscreen`, `chrome.runtime.getContexts()`
+- **Has access to:** `chrome.runtime`, `chrome.tabs`, `chrome.offscreen`, `chrome.runtime.getContexts()`, `chrome.storage.local`
 - **Does NOT have:** DOM, `window`, AudioContext, Cache API (technically available but should NOT be used here — offscreen doc owns caching)
 - **Console visible in:** chrome://extensions → "service worker" link
-- **Role:** message router only. Routes messages between content scripts and offscreen document using `source` field tagging.
+- **Role:** routes messages between content scripts and offscreen document using `source` field tagging. Reads saved text rules and attaches them to each play request; preprocessing itself runs offscreen.
 
 ### Offscreen Document (offscreen.html, offscreen.js)
 
 - **Runs in:** extension origin, hidden page
 - **Has access to:** Cache API (extension origin), AudioContext, Web Workers, `chrome.runtime.sendMessage()`, `chrome.runtime.onMessage`, `chrome.runtime.getURL()`, full DOM APIs, ES module imports
-- **Does NOT have:** `chrome.tabs`, visible UI
+- **Does NOT have:** `chrome.storage`, `chrome.tabs`, visible UI. **Only `chrome.runtime` is supported among extension APIs.** Receive settings via runtime messages; tests must not mock storage here.
 - **Console visible in:** its own DevTools (may appear under chrome://extensions inspect views, or may need manual inspection)
 - **Role:** owns audio playback, weight/voice caching, download lifecycle, word timing estimation, spawns and manages the TTS worker
 
