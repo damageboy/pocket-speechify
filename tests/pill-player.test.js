@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import { initPillPlayer } from "../src/pill-player.js";
 import { createState } from "../src/state.js";
@@ -231,5 +231,62 @@ describe("pill progress display", () => {
 		state.dispatch({ progress: { totalSec: 125, remainingSec: 31, percent: 75 } });
 		expect(duration()).toBe("0:31");
 		expect(Number(arc().getAttribute("stroke-dashoffset"))).toBeCloseTo(circumference / 4, 0);
+	});
+});
+
+describe("pinch zoom (visual viewport)", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("keeps the pill inside the visible area while zoomed and restores the CSS position at scale 1", async () => {
+		const vv = Object.assign(new EventTarget(), {
+			scale: 1,
+			offsetLeft: 0,
+			offsetTop: 0,
+			width: 1265,
+			height: 800,
+		});
+		vi.stubGlobal("visualViewport", vv);
+
+		const { pill } = await renderPill({
+			paragraphs: [{ text: "Playable text." }],
+			options: { hasPlayableContent: true },
+		});
+		// happy-dom has no layout engine: clientWidth is 0 and rects are empty, so
+		// pin the numbers a zoomed browser reports for a 1265x800 layout viewport.
+		Object.defineProperty(document.documentElement, "clientWidth", {
+			value: 1265,
+			configurable: true,
+		});
+		vi.spyOn(pill, "getBoundingClientRect").mockReturnValue({ height: 218 });
+
+		// Pinch zoom to 2x anchored at the top-left of the layout viewport.
+		vv.scale = 2;
+		vv.width = 632.5;
+		vv.height = 400;
+		vv.dispatchEvent(new Event("resize"));
+
+		// 1265 - (0 + 632.5) + 18 / 2 = 641.5 -> 18 screen px from the visible right edge
+		expect(pill.style.right).toBe("641.5px");
+		// 0 + 400 / 2 - 218 / 2 = 91 -> vertically centered in the visible area
+		expect(pill.style.top).toBe("91px");
+
+		// Panning while zoomed moves the visible area: visualViewport scroll event.
+		vv.offsetLeft = 50;
+		vv.offsetTop = 100;
+		vv.dispatchEvent(new Event("scroll"));
+		expect(pill.style.right).toBe("591.5px");
+		expect(pill.style.top).toBe("191px");
+
+		// Back to 100%: the stylesheet owns the position again.
+		vv.scale = 1;
+		vv.offsetLeft = 0;
+		vv.offsetTop = 0;
+		vv.width = 1265;
+		vv.height = 800;
+		vv.dispatchEvent(new Event("resize"));
+		expect(pill.style.right).toBe("");
+		expect(pill.style.top).toBe("");
 	});
 });

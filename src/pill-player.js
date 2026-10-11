@@ -764,4 +764,50 @@ export async function initPillPlayer(
 
 	// --- Append to shadow root ---
 	shadow.appendChild(pill);
+
+	// --- Trackpad pinch zoom (visual viewport) ---
+	// Browser zoom (Cmd/Ctrl +/-) resizes the layout viewport, so fixed elements
+	// follow it for free. A trackpad pinch only changes the visual viewport: no
+	// window resize fires and the pill would stay behind at its layout viewport
+	// coordinates. window.visualViewport reports those changes via resize/scroll.
+	const PILL_EDGE_MARGIN_PX = 18; // matches .pill-container { right: 18px }
+
+	function repositionPillForVisualViewport() {
+		const vv = window.visualViewport;
+		if (!vv) return;
+
+		// Not zoomed or panned — let the stylesheet position the pill.
+		if (vv.scale === 1 && vv.offsetLeft === 0 && vv.offsetTop === 0) {
+			pill.style.right = "";
+			pill.style.top = "";
+			return;
+		}
+
+		// `right` is measured from the layout viewport edge, so shift it by the
+		// visual viewport offset. Pinch zoom magnifies layout pixels, hence the
+		// margin is divided by the scale to keep a constant on-screen gap.
+		const layoutWidth = document.documentElement.clientWidth;
+		pill.style.right = `${
+			layoutWidth - vv.offsetLeft - vv.width + PILL_EDGE_MARGIN_PX / vv.scale
+		}px`;
+
+		// Center the pill in the visible area; a hidden pill keeps the CSS top.
+		const pillHeight = pill.getBoundingClientRect().height;
+		pill.style.top = pillHeight
+			? `${vv.offsetTop + vv.height / 2 - pillHeight / 2}px`
+			: "";
+	}
+
+	if (window.visualViewport) {
+		window.visualViewport.addEventListener("resize", () => {
+			console.log(
+				`[Pocket Speechify] Visual viewport zoom triggered (scale ${window.visualViewport.scale})`,
+			);
+			repositionPillForVisualViewport();
+		});
+		window.visualViewport.addEventListener("scroll", repositionPillForVisualViewport, {
+			passive: true,
+		});
+	}
+	repositionPillForVisualViewport();
 }
