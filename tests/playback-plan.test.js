@@ -40,8 +40,8 @@ describe("createPlaybackPlan", () => {
 
 	it("follows the playing paragraph by identity when the live list is rebuilt", () => {
 		const live = [
-			{ twitterIdentity: "status:a", text: "A." },
-			{ twitterIdentity: "status:b", text: "B." },
+			{ identity: "status:a", text: "A." },
+			{ identity: "status:b", text: "B." },
 		];
 		const plan = createPlaybackPlan({
 			paragraphs: live,
@@ -53,14 +53,14 @@ describe("createPlaybackPlan", () => {
 		live.splice(
 			0,
 			live.length,
-			{ twitterIdentity: "status:new", text: "New." },
-			{ twitterIdentity: "status:a", text: "A." },
-			{ twitterIdentity: "status:b", text: "B." },
+			{ identity: "status:new", text: "New." },
+			{ identity: "status:a", text: "A." },
+			{ identity: "status:b", text: "B." },
 		);
 		expect(toGlobalParagraphIndex(plan, 0)).toBe(2);
 		expect(canMoveToParagraph(plan, 2)).toBe(true);
 
-		live.splice(0, live.length, { twitterIdentity: "status:new", text: "New." });
+		live.splice(0, live.length, { identity: "status:new", text: "New." });
 		expect(toGlobalParagraphIndex(plan, 0)).toBeNull();
 	});
 
@@ -75,9 +75,9 @@ describe("createPlaybackPlan", () => {
 	});
 
 	it("does not map spoken text onto an edited tweet with the same identity", () => {
-		const live = [{ twitterIdentity: "status:a", text: "Original words." }];
+		const live = [{ identity: "status:a", text: "Original words." }];
 		const plan = createPlaybackPlan({ paragraphs: live, playbackMode: "single" });
-		live[0] = { twitterIdentity: "status:a", text: "Changed words." };
+		live[0] = { identity: "status:a", text: "Changed words." };
 		expect(toGlobalParagraphIndex(plan, 0)).toBeNull();
 	});
 

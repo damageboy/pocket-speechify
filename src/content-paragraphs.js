@@ -23,17 +23,19 @@ export function buildParagraph(element, text, source = "generic", baseOffset = 0
 export function replaceParagraphs(target, next) {
 	// Reuse only when DOM offsets and text are unchanged. Replacements and
 	// changed whitespace must invalidate consumers even if trimmed text matches.
+	// Element-less paragraphs (Google Docs) are keyed by their identity.
+	const keyOf = paragraph => paragraph.element ?? paragraph.identity;
 	const previous = new Map();
 	for (const paragraph of target) {
-		const list = previous.get(paragraph.element) || [];
+		const list = previous.get(keyOf(paragraph)) || [];
 		list.push(paragraph);
-		previous.set(paragraph.element, list);
+		previous.set(keyOf(paragraph), list);
 	}
 	const reconciled = next.map(paragraph =>
-		previous.get(paragraph.element)?.find(old =>
+		previous.get(keyOf(paragraph))?.find(old =>
 			old.text === paragraph.text && old.source === paragraph.source &&
 			old.startOffset === paragraph.startOffset && old.endOffset === paragraph.endOffset &&
-			old.twitterIdentity === paragraph.twitterIdentity &&
+			old.identity === paragraph.identity &&
 			old.textNodes.length === paragraph.textNodes.length &&
 			old.textNodes.every((node, index) => node === paragraph.textNodes[index])
 		) || paragraph

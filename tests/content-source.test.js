@@ -276,7 +276,7 @@ describe("createContentSource", () => {
 			"Same words from different tweets.",
 			"Same words from different tweets.",
 		]);
-		expect(source.getParagraphs().map((p) => p.twitterIdentity)).toEqual([
+		expect(source.getParagraphs().map((p) => p.identity)).toEqual([
 			"status:https://x.com/alice/status/111",
 			"status:https://x.com/bob/status/222",
 		]);
@@ -303,7 +303,7 @@ describe("createContentSource", () => {
 		vi.runAllTimers();
 
 		expect(source.getParagraphs()[0].element).not.toBe(firstElement);
-		expect(source.getParagraphs()[0].twitterIdentity).toBe(
+		expect(source.getParagraphs()[0].identity).toBe(
 			"status:https://x.com/alice/status/111",
 		);
 		expect(onChange).toHaveBeenCalledTimes(1);
@@ -321,7 +321,7 @@ describe("createContentSource", () => {
 			.map((call) => String(call[0]))
 			.find((message) => message.includes("Twitter tweet detected"));
 
-		expect(source.getParagraphs()[0].twitterIdentity).toBe(
+		expect(source.getParagraphs()[0].identity).toBe(
 			`text:${fullTweetText}`,
 		);
 		expect(detectedLog).toBeUndefined();

@@ -1,6 +1,12 @@
 import { createTwitterContentSource, matchesTwitterUrl } from "./twitter.js";
+import { createGoogleDocsContentSource, matchesGoogleDocsUrl } from "./google-docs.js";
 
 const SITE_EXTRACTORS = [
+	{
+		name: "google-docs",
+		matches: matchesGoogleDocsUrl,
+		createContentSource: createGoogleDocsContentSource,
+	},
 	{
 		name: "twitter",
 		matches: matchesTwitterUrl,

@@ -81,7 +81,7 @@ function hidePill(pill) {
   pill.style.opacity = '0';
 }
 
-export function initScrollNav(state, paragraphs) {
+export function initScrollNav(state, paragraphs, geometry = null) {
   const { pill: topPill, wordBadge: topBadge } = createPill(true);
   const { pill: bottomPill, wordBadge: bottomBadge } = createPill(false);
 
@@ -101,6 +101,10 @@ export function initScrollNav(state, paragraphs) {
     const current = getCurrent();
     if (!current) return null;
     const { para, word } = current;
+    if (geometry) {
+      const index = state.get().currentParagraphIndex;
+      return geometry.locate(index, word?.startOffset ?? para.startOffset, word?.endOffset ?? para.endOffset);
+    }
     const rect = word &&
       createRangeFromOffsets(para.element, word.startOffset, word.endOffset)?.getBoundingClientRect();
     if (rect && (rect.width > 0 || rect.height > 0)) return rect;
@@ -124,13 +128,13 @@ export function initScrollNav(state, paragraphs) {
       return;
     }
 
-    const vpHeight = window.innerHeight;
+    const view = geometry?.viewport() ?? { top: 0, bottom: window.innerHeight };
 
-    if (rect.bottom < 0) {
+    if (rect.bottom < view.top) {
       // Highlight is above viewport
       showPill(topPill);
       hidePill(bottomPill);
-    } else if (rect.top > vpHeight) {
+    } else if (rect.top > view.bottom) {
       // Highlight is below viewport
       hidePill(topPill);
       showPill(bottomPill);
@@ -147,7 +151,7 @@ export function initScrollNav(state, paragraphs) {
     if (!rect) return;
 
     enableAutoScroll(); // re-enable auto-scroll since user explicitly asked to go back
-    scrollToCenter(rect);
+    scrollToCenter(rect, geometry?.scroller());
     hidePill(topPill);
     hidePill(bottomPill);
   }
@@ -156,7 +160,8 @@ export function initScrollNav(state, paragraphs) {
   bottomPill.addEventListener('click', scrollToHighlight);
 
   const throttledCheck = throttle(checkVisibility, 100);
-  window.addEventListener('scroll', throttledCheck, { passive: true });
+  // Capture also sees scrolling containers such as the Google Docs editor.
+  window.addEventListener('scroll', throttledCheck, { passive: true, capture: true });
 
   state.subscribe((current, prev) => {
     if (current.playback === 'idle') {

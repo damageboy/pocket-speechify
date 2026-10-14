@@ -5,8 +5,8 @@ export const PLAYBACK_MODE_SINGLE = "single";
 export function findParagraphIndex(paragraphs, target) {
 	if (!target) return -1;
 	return paragraphs.findIndex(paragraph => paragraph === target ||
-		(paragraph.text === target.text && (target.twitterIdentity
-			? paragraph.twitterIdentity === target.twitterIdentity
+		(paragraph.text === target.text && (target.identity
+			? paragraph.identity === target.identity
 			: target.element && paragraph.element === target.element &&
 				paragraph.startOffset === target.startOffset)));
 }

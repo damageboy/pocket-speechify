@@ -111,6 +111,15 @@ describe('auto-scroll', () => {
     expect(scrollTo).toHaveBeenCalledTimes(2);
   });
 
+  it('follows a playback started after the user scrolled while idle', () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    state.dispatch({ playback: 'idle' });
+    window.dispatchEvent(new Event('scroll'));
+    offscreenWord();
+    state.dispatch({ playback: 'playing', currentParagraphIndex: 0, currentWordIndex: 2 });
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
   it('stops following after a user scroll inside a container', () => {
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
     paragraphs[0].element.dispatchEvent(new Event('scroll'));

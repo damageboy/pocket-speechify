@@ -36,6 +36,12 @@ export default defineBackground(() => {
   }
 
   const lastLoggedBucket = new Map();
+  // Last known top-frame URL per tab. A fragment-only change keeps the document
+  // and its playback: Google Docs rewrites #heading=… as the cursor moves, and
+  // Chrome reports that as a loading tab. Change URLs are only visible where
+  // the extension has host access (Google Docs).
+  const tabUrls = new Map();
+  const withoutFragment = url => url.split('#')[0];
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !msg.type) return;
@@ -56,6 +62,7 @@ export default defineBackground(() => {
         return true;
       }
       console.log('[SW] From content script:', msg.type, msg);
+      if (sender.frameId === 0 && sender.url) tabUrls.set(sender.tab.id, sender.url);
       // TTS control messages: forward to offscreen document
       if (msg.type.startsWith('tts-')) {
         forwarding = forwarding.then(() => handleTTSFromContent(msg, sender.tab.id));
@@ -144,12 +151,22 @@ export default defineBackground(() => {
   // Tab close, reload, navigation, or discard: unload messaging from the
   // content script is unreliable, so the service worker owns this signal.
   chrome.tabs.onRemoved.addListener((tabId) => {
+    tabUrls.delete(tabId);
     console.log('[SW] Tab removed:', tabId);
     cancelTabPlayback(tabId);
   });
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    const previousUrl = tabUrls.get(tabId);
+    if (changeInfo.url) tabUrls.set(tabId, changeInfo.url);
     if (changeInfo.status !== 'loading' && !changeInfo.discarded) return;
+    // Reloads report no URL; same-document fragment updates report the URL,
+    // possibly unchanged when Docs re-sets the same #heading.
+    if (!changeInfo.discarded && changeInfo.url && previousUrl &&
+        withoutFragment(changeInfo.url) === withoutFragment(previousUrl)) {
+      console.log('[SW] Tab fragment changed, keeping playback:', tabId);
+      return;
+    }
     console.log('[SW] Tab navigating or discarded:', tabId);
     cancelTabPlayback(tabId);
   });

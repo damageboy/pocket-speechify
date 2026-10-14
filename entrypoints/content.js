@@ -64,6 +64,8 @@ export default defineContentScript({
 
 		const pageUrl = new URL(location.href);
 		const contentSource = createContentSource(pageUrl, document);
+		// Sources backed by a page API (Google Docs) load their text asynchronously.
+		await contentSource.ready;
 		const paragraphs = contentSource.getParagraphs();
 		function articleSample() {
 			let text = "";
@@ -354,7 +356,7 @@ export default defineContentScript({
 			async play(fromParagraph) {
 				if (state.get().speechSettingsLoading) return;
 				const target = fromParagraph === undefined ? null : paragraphs[fromParagraph];
-				contentSource.refresh();
+				await contentSource.refresh();
 				const revision = ++operationRevision;
 				const resolution = manualLanguage ? null : await resolvePageLanguage(new URL(location.href), document, articleSample());
 				if (revision !== operationRevision) return;
@@ -362,7 +364,9 @@ export default defineContentScript({
 				const profile = await loadProfile(language);
 				if (revision !== operationRevision) return;
 				state.dispatch({ ...resolution, ...profileState(profile), preferencesError: unsavedLanguages.has(language) });
-				fromParagraph = target ? findParagraphIndex(paragraphs, target) : 0;
+				fromParagraph = target
+					? findParagraphIndex(paragraphs, target)
+					: (contentSource.getStartParagraph?.() ?? 0);
 				if (fromParagraph < 0) return;
 				if (!state.get().hasPlayableContent) {
 					log.warn("play: page is not playable");
@@ -524,13 +528,13 @@ export default defineContentScript({
 
 		function initializePlaybackHelpers(playable, autoShow) {
 			if (playable && !highlights) {
-				highlights = initHighlights(state, paragraphs);
+				highlights = initHighlights(state, paragraphs, contentSource.geometry);
 			}
 			if (autoShow && !hoverController) {
-				hoverController = initHoverPlayer(shadow, state, paragraphs, actions);
+				hoverController = initHoverPlayer(shadow, state, paragraphs, actions, contentSource.geometry);
 			}
 			if (autoShow && !scrollNavInitialized) {
-				initScrollNav(state, paragraphs);
+				initScrollNav(state, paragraphs, contentSource.geometry);
 				scrollNavInitialized = true;
 			}
 		}

@@ -131,8 +131,10 @@ export function createRangeFromOffsets(element, startOffset, endOffset) {
 // Smooth scrolling fires many scroll events. Track programmatic scrolls until
 // `scrollend`, or until scroll events stop arriving (fallback when no scroll
 // happens or `scrollend` is unsupported), so listeners can tell them apart
-// from user scrolling.
+// from user scrolling. Capture listeners also see element scrolls, which do
+// not bubble to window.
 const PROGRAMMATIC_SCROLL_IDLE_MS = 300;
+const CAPTURE = { passive: true, capture: true };
 let programmaticScroll = false;
 let programmaticScrollTimer = null;
 
@@ -144,20 +146,27 @@ function armProgrammaticScrollTimer() {
 function endProgrammaticScroll() {
   programmaticScroll = false;
   clearTimeout(programmaticScrollTimer);
-  window.removeEventListener('scroll', armProgrammaticScrollTimer);
-  window.removeEventListener('scrollend', endProgrammaticScroll);
+  window.removeEventListener('scroll', armProgrammaticScrollTimer, CAPTURE);
+  window.removeEventListener('scrollend', endProgrammaticScroll, CAPTURE);
 }
 
 export function isProgrammaticScroll() {
   return programmaticScroll;
 }
 
-export function scrollToCenter(rect) {
+/** Center a viewport rect in `scroller` (an element), or in the window. */
+export function scrollToCenter(rect, scroller = null) {
   endProgrammaticScroll();
   programmaticScroll = true;
-  window.addEventListener('scroll', armProgrammaticScrollTimer, { passive: true });
-  window.addEventListener('scrollend', endProgrammaticScroll);
+  window.addEventListener('scroll', armProgrammaticScrollTimer, CAPTURE);
+  window.addEventListener('scrollend', endProgrammaticScroll, CAPTURE);
   armProgrammaticScrollTimer();
+  if (scroller) {
+    const view = scroller.getBoundingClientRect();
+    const top = scroller.scrollTop + rect.top - (view.top + view.height / 2);
+    scroller.scrollTo({ top, behavior: 'smooth' });
+    return;
+  }
   const absoluteTop = rect.top + window.scrollY;
   window.scrollTo({ top: absoluteTop - window.innerHeight / 2, behavior: 'smooth' });
 }

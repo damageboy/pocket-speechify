@@ -128,6 +128,24 @@ it('cancels the owning tab playback when that tab is closed, navigated, or disca
     { type: 'tts-cancel-tab', tabId: 3, source: 'service-worker' }));
 });
 
+it('keeps playback through same-document fragment updates but not reloads or navigations', async () => {
+  const doc = 'https://docs.google.com/document/d/x/edit?tab=t.0';
+  receive({ type: 'tts-pause', sessionId: 'A', genId: 1 }, { tab: { id: 5 }, frameId: 0, url: doc });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(1));
+  chrome.runtime.sendMessage.mockClear();
+  tabUpdated(5, { status: 'loading', url: `${doc}#heading=h.abc` });
+  tabUpdated(5, { status: 'loading', url: `${doc}#heading=h.abc` });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  tabUpdated(5, { status: 'loading' });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+    { type: 'tts-cancel-tab', tabId: 5, source: 'service-worker' }));
+  chrome.runtime.sendMessage.mockClear();
+  tabUpdated(5, { status: 'loading', url: 'https://docs.google.com/document/d/other/edit' });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+    { type: 'tts-cancel-tab', tabId: 5, source: 'service-worker' }));
+});
+
 it('does not create an offscreen document just to cancel a closed tab', async () => {
   chrome.runtime.getContexts.mockResolvedValue([]);
   tabRemoved(7);

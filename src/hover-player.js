@@ -1,7 +1,7 @@
 import { hoverPlayIcon } from "./icons.js";
 import { findParagraphIndex } from "./playback-plan.js";
 
-export function initHoverPlayer(shadow, state, paragraphs, actions) {
+export function initHoverPlayer(shadow, state, paragraphs, actions, geometry = null) {
 	const btn = document.createElement("button");
 	btn.className = "hover-player";
 	btn.style.display = "none";
@@ -20,7 +20,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 	let hideDelayTimer = null;
 	let isOverButton = false;
 
-	function showAt(element, index) {
+	function showAt(rect, index) {
 		if (fadeOutTimer !== null) {
 			clearTimeout(fadeOutTimer);
 			fadeOutTimer = null;
@@ -32,7 +32,6 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 
 		currentParagraph = paragraphs[index];
 
-		const rect = element.getBoundingClientRect();
 		btn.style.left = `${rect.left - 36}px`;
 		btn.style.top = `${rect.top}px`;
 
@@ -74,6 +73,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 	const boundElements = new WeakSet();
 
 	function bindParagraphs() {
+		if (geometry) return;
 		paragraphs.forEach((para) => {
 			const el = para.element;
 			if (!el || boundElements.has(el)) return;
@@ -88,7 +88,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 				const index = paragraphs.findIndex(
 					(paragraph) => paragraph.element === el,
 				);
-				if (index >= 0) showAt(el, index);
+				if (index >= 0) showAt(el.getBoundingClientRect(), index);
 			});
 
 			el.addEventListener("mouseleave", () => {
@@ -99,6 +99,29 @@ export function initHoverPlayer(shadow, state, paragraphs, actions) {
 	}
 
 	bindParagraphs();
+
+	// Canvas text has no paragraph elements to receive mouseenter; hit-test the
+	// pointer against rendered paragraph boxes instead, once per frame.
+	if (geometry) {
+		let frame = null;
+		let pointer = null;
+		document.addEventListener("mousemove", (event) => {
+			pointer = { x: event.clientX, y: event.clientY };
+			if (frame !== null) return;
+			frame = requestAnimationFrame(() => {
+				frame = null;
+				const hit = geometry.paragraphAt(pointer.x, pointer.y);
+				const shown = btn.style.display !== "none";
+				if (hit && (paragraphs[hit.index] !== currentParagraph || !shown || hideDelayTimer !== null || fadeOutTimer !== null)) {
+					console.log("[Pocket Speechify] Hover paragraph triggered");
+					showAt(hit.rect, hit.index);
+				} else if (!hit && shown && !isOverButton && hideDelayTimer === null && fadeOutTimer === null) {
+					console.log("[Pocket Speechify] Hover paragraph leave triggered");
+					scheduleHide();
+				}
+			});
+		}, { passive: true, capture: true });
+	}
 
 	btn.addEventListener("mouseenter", () => {
 		console.log("[Pocket Speechify] Hover play button hover triggered");

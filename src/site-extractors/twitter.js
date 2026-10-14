@@ -81,7 +81,7 @@ function extractTwitterParagraphs(doc) {
 		const paragraph = buildParagraph(element, text, "twitter");
 		if (!paragraph) continue;
 		seenIdentities.add(identity);
-		paragraph.twitterIdentity = identity;
+		paragraph.identity = identity;
 		paragraph.textNodes = segments.map(segment => segment.node);
 		next.push(paragraph);
 	}
