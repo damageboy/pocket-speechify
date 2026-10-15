@@ -36,6 +36,16 @@ export function pauseIcon() {
   );
 }
 
+export function volumeIcon(muted = false) {
+  const icon = svg('0 0 24 24',
+    path('M11 4L5 9H2v6h3l6 5V4Z', { fill: 'currentColor' }),
+    path(muted ? 'M16 9l6 6M22 9l-6 6' : 'M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14',
+      { stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round' }),
+  );
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
 export function waveformIcon() {
   const s = svg('0 0 20 20');
   const lines = [

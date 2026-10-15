@@ -1,8 +1,9 @@
 import { loadTextRules } from '../src/text-rules.js';
-import { createSpeechProfileStore } from '../src/speech-preferences.js';
+import { createSpeechProfileStore, normalizeVolumeSettings, VOLUME_SETTINGS_KEY } from '../src/speech-preferences.js';
 
 export default defineBackground(() => {
   const profiles = createSpeechProfileStore(chrome.storage.local);
+  let volumeSettingsQueue = Promise.resolve();
   let offscreenCreating = null;
   // Preserve command order even when offscreen discovery/creation is asynchronous.
   let forwarding = Promise.resolve();
@@ -48,6 +49,23 @@ export default defineBackground(() => {
 
     // --- Messages FROM content scripts (have sender.tab) ---
     if (sender.tab) {
+      if (msg.type === 'volume-settings-get' || msg.type === 'volume-settings-update') {
+        const result = volumeSettingsQueue.then(async () => {
+          if (msg.type === 'volume-settings-get') {
+            const saved = await chrome.storage.local.get(VOLUME_SETTINGS_KEY);
+            return normalizeVolumeSettings(saved[VOLUME_SETTINGS_KEY]);
+          }
+          const settings = normalizeVolumeSettings(msg.settings);
+          await chrome.storage.local.set({ [VOLUME_SETTINGS_KEY]: settings });
+          return settings;
+        });
+        volumeSettingsQueue = result.catch(() => {});
+        result.then(sendResponse, error => {
+          console.warn('[Pocket Speechify] Volume settings request failed:', error);
+          sendResponse({ error: String(error) });
+        });
+        return true;
+      }
       if (['speech-detect-language', 'speech-profile-get', 'speech-profile-update'].includes(msg.type)) {
         // Detection and preferences never create or block the audio pipeline.
         const result = Promise.resolve().then(() => {

@@ -60,6 +60,11 @@ beforeEach(async () => {
     if (msg.type === 'speech-detect-language') return { isReliable: false, languages: [] };
     if (msg.type === 'speech-profile-get') return profiles.get(msg.language);
     if (msg.type === 'speech-profile-update') return profiles.update(msg.language, msg.patch);
+    if (msg.type === 'volume-settings-get') return stored.volume || { volume: 1, lastNonzeroVolume: 1 };
+    if (msg.type === 'volume-settings-update') {
+      stored.volume = structuredClone(msg.settings);
+      return stored.volume;
+    }
   });
   await loadPage();
 });
@@ -134,6 +139,72 @@ it('preserves saved speed through model and voice changes and persists later spe
   await loadPage();
   await ui.actions.play();
   expect(request()).toMatchObject({ language: 'english_2026-09_24l', voiceId: 'vera', speed: 2.3 });
+});
+
+it('changes live volume, persists mute across languages and pages, and restores the previous level', async () => {
+  ui.state.dispatch({ panelOpen: 'volume' });
+  const slider = ui.shadow.querySelector('input[aria-label="Volume"]');
+  expect(slider?.value).toBe('100');
+  await ui.actions.play();
+  const owner = request();
+  slider.value = '37';
+  slider.dispatchEvent(new Event('input'));
+  await refresh();
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'tts-set-volume', volume: 0.37, sessionId: owner.sessionId, genId: owner.genId,
+  }));
+  expect(request()).toBe(owner); // Adjusting volume must not restart generation.
+  ui.shadow.querySelector('button[aria-label="Mute"]').click();
+  await refresh();
+  expect(ui.shadow.querySelector('.volume-value').textContent).toBe('Muted');
+  for (const listener of listeners) listener({
+    type: 'tts-paragraph-done', sessionId: owner.sessionId, genId: owner.genId, sourceSec: 3,
+  });
+  expect(request()).toMatchObject({ paragraphIndex: 1, volume: 0 });
+  for (const [url, lang] of [['https://example.com/article', 'en'], ['https://another.org/story', 'fr']]) {
+    await loadPage(url, lang);
+    ui.state.dispatch({ panelOpen: 'volume' });
+    expect(ui.shadow.querySelector('input[aria-label="Volume"]').value).toBe('0');
+    await ui.actions.play();
+    expect(request().volume).toBe(0);
+  }
+  ui.shadow.querySelector('button[aria-label="Unmute"]').click();
+  await refresh();
+  expect(ui.shadow.querySelector('input[aria-label="Volume"]').value).toBe('37');
+  ui.actions.stop();
+  await ui.actions.play();
+  expect(request().volume).toBe(0.37);
+});
+
+it('keeps a slider edit made while playback is reading older saved volume', async () => {
+  const send = chrome.runtime.sendMessage.getMockImplementation();
+  let finish;
+  chrome.runtime.sendMessage.mockImplementation(msg => msg.type === 'volume-settings-get'
+    ? new Promise(resolve => { finish = resolve; }) : send(msg));
+  const playing = ui.actions.play();
+  await refresh();
+  expect(finish).toBeTypeOf('function');
+  await ui.actions.setVolume(0.23);
+  finish({ volume: 0.81, lastNonzeroVolume: 0.81 });
+  await playing;
+  expect(request().volume).toBe(0.23);
+  expect(ui.state.get().volume).toBe(0.23);
+});
+
+it('keeps live volume after a failed save and recovers on the next edit', async () => {
+  const send = chrome.runtime.sendMessage.getMockImplementation();
+  chrome.runtime.sendMessage.mockImplementation(msg => msg.type === 'volume-settings-update'
+    ? Promise.resolve({ error: 'Disk full' }) : send(msg));
+  ui.state.dispatch({ panelOpen: 'volume' });
+  await ui.actions.setVolume(0.42);
+  expect(ui.shadow.querySelector('.volume-status').textContent).toContain('Could not save');
+  await ui.actions.play();
+  expect(request().volume).toBe(0.42);
+  chrome.runtime.sendMessage.mockImplementation(send);
+  await ui.actions.setVolume(0.29);
+  expect(ui.shadow.querySelector('.volume-status').textContent).toBe('');
+  await loadPage();
+  expect(ui.state.get().volume).toBe(0.29);
 });
 
 it('does not let an explicit default voice click force the language of other pages', async () => {

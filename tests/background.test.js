@@ -176,6 +176,25 @@ it('answers profile patches from different tabs without creating an offscreen do
   expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
 });
 
+it('saves global muted volume independently of language profiles and serializes reads after writes', async () => {
+  const stored = {};
+  chrome.storage.local.get.mockImplementation(async key => ({ [key]: stored[key] }));
+  chrome.storage.local.set = async values => Object.assign(stored, values);
+  const request = (type, settings, tabId) => new Promise(resolve => {
+    expect(receive({ type, settings }, { tab: { id: tabId } }, resolve)).toBe(true);
+  });
+  expect(await request('volume-settings-get', undefined, 1)).toEqual({ volume: 1, lastNonzeroVolume: 1 });
+  await Promise.all([
+    request('volume-settings-update', { volume: 0.37, lastNonzeroVolume: 0.37 }, 1),
+    request('volume-settings-update', { volume: 0, lastNonzeroVolume: 0.37 }, 1),
+    request('volume-settings-get', undefined, 2).then(settings => {
+      expect(settings).toEqual({ volume: 0, lastNonzeroVolume: 0.37 });
+    }),
+  ]);
+  expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
+  expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+});
+
 it('uses browser text detection and returns failures without forwarding them to audio', async () => {
   chrome.i18n = { detectLanguage: vi.fn(async () => ({ isReliable: true, languages: [{ language: 'fr', percentage: 100 }] })) };
   const request = () => new Promise(resolve => {

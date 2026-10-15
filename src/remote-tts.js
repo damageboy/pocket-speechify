@@ -17,6 +17,7 @@ export class RemoteTTS extends EventTarget {
   #indexMap = []; // [{ paragraphIndex, startSentenceIndex, para }]
   #currentEntryIdx = 0;
   #speed = 1.0;
+  #volume = 1;
   #voiceId = DEFAULT_VOICE_ID;
   #language = DEFAULT_LANGUAGE_ID;
   #listener = null;
@@ -32,9 +33,10 @@ export class RemoteTTS extends EventTarget {
    * Builds a paragraph-level index map and sends paragraphs one at a time to offscreen.
    * Sentence offsets allow seeking without guessing normalized word indices.
    */
-  play(paragraphs, fromParagraph = 0, fromWord = 0, speed = 1.0, language = this.#language) {
+  play(paragraphs, fromParagraph = 0, fromWord = 0, speed = 1.0, language = this.#language, volume = this.#volume) {
     this.#language = language || DEFAULT_LANGUAGE_ID;
     this.#speed = speed;
+    this.#volume = volume;
     this.#genId++;
 
     // Build index map: one entry per paragraph from the starting position
@@ -65,6 +67,11 @@ export class RemoteTTS extends EventTarget {
   setSpeed(speed) {
     this.#speed = speed;
     this.#send({ type: 'tts-set-speed', speed });
+  }
+
+  setVolume(volume) {
+    this.#volume = volume;
+    this.#send({ type: 'tts-set-volume', volume });
   }
 
   setVoice(voiceId) {
@@ -123,6 +130,7 @@ export class RemoteTTS extends EventTarget {
       language: this.#language,
       voiceId: this.#voiceId,
       speed: this.#speed,
+      volume: this.#volume,
     });
   }
 

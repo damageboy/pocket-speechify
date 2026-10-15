@@ -1,5 +1,18 @@
 import { LANGUAGES, getLanguage, isSupportedLanguage } from './languages.js';
 
+// Volume is global, unlike the language-specific voice/model/speed profiles.
+export const VOLUME_SETTINGS_KEY = 'pocket-speechify-volume-v1';
+
+export function normalizeVolumeSettings(value = {}) {
+  const volume = Number.isFinite(value?.volume) ? Math.min(1, Math.max(0, value.volume)) : 1;
+  const previous = value?.lastNonzeroVolume;
+  const lastNonzeroVolume = Number.isFinite(previous) && previous > 0 ? Math.min(1, previous) : 1;
+  return {
+    volume,
+    lastNonzeroVolume: volume > 0 ? volume : lastNonzeroVolume,
+  };
+}
+
 export function normalizeSpeechProfile(language, value = {}) {
   const models = LANGUAGES.filter(model => model.language === language);
   if (!models.length) throw new Error(`Unsupported speech language: ${language}`);

@@ -1,4 +1,4 @@
-import { closeIcon, searchIcon } from './icons.js';
+import { closeIcon, searchIcon, volumeIcon } from './icons.js';
 import { LANGUAGES, getDefaultVoiceForLanguage, getLanguage, languageFlag } from './languages.js';
 import { VOICES, voiceDisplayName, getVoiceAvatarUrl, hasBundledVoiceAvatar, avatarInitials, avatarColor } from './voices.js';
 
@@ -160,6 +160,75 @@ function createSpeedPanel(state, actions) {
   // Initial render
   sync(state.get());
 
+  return { panel, sync };
+}
+
+// ============================================================
+// VOLUME PANEL
+// ============================================================
+
+function createVolumePanel(state, actions, shadow) {
+  const panel = document.createElement('div');
+  panel.className = 'side-panel volume-panel';
+  panel.id = 'volume-panel';
+  panel.setAttribute('role', 'group');
+  panel.setAttribute('aria-label', 'Volume controls');
+  panel.innerHTML = `
+    <div class="side-panel-header">
+      <h2>Volume</h2><button class="panel-close-btn" aria-label="Close volume"></button>
+    </div>
+    <div class="volume-controls">
+      <div class="volume-display">
+        <button class="btn btn-32 btn-standard volume-mute" aria-label="Mute"></button>
+        <span class="volume-value"></span>
+      </div>
+      <input class="volume-slider" type="range" min="0" max="100" step="1" aria-label="Volume">
+      <div class="volume-endpoints" aria-hidden="true"><span>0%</span><span>100%</span></div>
+      <div class="volume-status" role="status"></div>
+    </div>`;
+  const closeBtn = panel.querySelector('.panel-close-btn');
+  closeBtn.appendChild(closeIcon());
+  function close() {
+    state.dispatch({ panelOpen: null });
+    shadow.querySelector('.volume-button')?.focus();
+  }
+  closeBtn.addEventListener('click', () => {
+    console.log('[Pocket Speechify] Volume panel close clicked');
+    close();
+  });
+  panel.addEventListener('keydown', event => {
+    console.log(`[Pocket Speechify] Volume panel key ${event.key} triggered`);
+    // Keep page shortcuts from intercepting the slider's native arrow keys.
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    }
+  });
+  const muteBtn = panel.querySelector('.volume-mute');
+  muteBtn.addEventListener('click', () => {
+    console.log('[Pocket Speechify] Volume mute button clicked');
+    actions.toggleMute();
+  });
+  const slider = panel.querySelector('.volume-slider');
+  slider.addEventListener('input', () => {
+    console.log(`[Pocket Speechify] Volume slider triggered to ${slider.value}%`);
+    actions.setVolume(Number(slider.value) / 100);
+  });
+  function sync(s) {
+    const percent = Math.round(s.volume * 100);
+    const muted = s.volume === 0;
+    slider.value = percent;
+    slider.style.setProperty('--volume-percent', `${percent}%`);
+    slider.setAttribute('aria-valuetext', muted ? 'Muted' : `${percent}%`);
+    muteBtn.replaceChildren(volumeIcon(muted));
+    muteBtn.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+    panel.querySelector('.volume-value').textContent = muted ? 'Muted' : `${percent}%`;
+    let status = muted ? `Unmute restores ${Math.round(s.lastNonzeroVolume * 100)}%` : '';
+    if (s.volumeSettingsError) status = 'Could not save volume. Applies to this page only.';
+    panel.querySelector('.volume-status').textContent = status;
+  }
+  sync(state.get());
   return { panel, sync };
 }
 
@@ -420,16 +489,20 @@ export function initSidePanels(shadow, state, actions) {
 
   const { panel: speedPanel, sync: syncSpeed } = createSpeedPanel(state, actions);
   const { panel: voicePanel, sync: syncVoice, resetSearch } = createVoicePanel(state, actions);
+  const { panel: volumePanel, sync: syncVolume } = createVolumePanel(state, actions, shadow);
 
   // Panels start hidden
   speedPanel.style.display = 'none';
   voicePanel.style.display = 'none';
+  volumePanel.style.display = 'none';
 
   pill.appendChild(speedPanel);
   pill.appendChild(voicePanel);
+  pill.appendChild(volumePanel);
 
   state.subscribe((current, prev) => {
     if (current.panelOpen !== prev.panelOpen) {
+      volumePanel.style.display = 'none';
       if (current.panelOpen === 'speed') {
         voicePanel.style.display = 'none';
         syncSpeed(current);
@@ -455,10 +528,22 @@ export function initSidePanels(shadow, state, actions) {
         voicePanel.style.animation = 'none';
         voicePanel.offsetHeight; // reflow
         voicePanel.style.animation = '';
+      } else if (current.panelOpen === 'volume') {
+        speedPanel.style.display = 'none';
+        voicePanel.style.display = 'none';
+        syncVolume(current);
+        volumePanel.style.display = '';
+        volumePanel.querySelector('.volume-slider').focus({ preventScroll: true });
       } else {
         speedPanel.style.display = 'none';
         voicePanel.style.display = 'none';
       }
+    }
+
+    if (current.panelOpen === 'volume' &&
+        (current.volume !== prev.volume || current.lastNonzeroVolume !== prev.lastNonzeroVolume ||
+         current.volumeSettingsError !== prev.volumeSettingsError)) {
+      syncVolume(current);
     }
 
     // Keep speed panel in sync while it's open

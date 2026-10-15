@@ -16,7 +16,7 @@ import {
 } from "../src/playback-plan.js";
 import { resolvePageLanguage } from "../src/language-detection.js";
 import { getLanguage, isSupportedLanguage } from "../src/languages.js";
-import { normalizeSpeechProfile } from "../src/speech-preferences.js";
+import { normalizeSpeechProfile, normalizeVolumeSettings } from "../src/speech-preferences.js";
 import {
 	computeProgress,
 	createRateMeter,
@@ -119,6 +119,24 @@ export default defineContentScript({
 			...profileState(initialProfile),
 			hasPlayableContent,
 		});
+
+		let volumeWrites = Promise.resolve();
+		let volumeRevision = 0;
+		let unsavedVolume = false;
+		async function loadVolume() {
+			const revision = volumeRevision;
+			await volumeWrites;
+			if (unsavedVolume) return;
+			try {
+				const result = await chrome.runtime.sendMessage({ type: "volume-settings-get" });
+				if (!result || result.error) throw new Error(result?.error || "Volume settings unavailable");
+				// A slider change while this read was pending takes precedence.
+				if (revision === volumeRevision) state.dispatch({ ...normalizeVolumeSettings(result), volumeSettingsError: false });
+			} catch (error) {
+				console.warn("[Pocket Speechify] Could not load volume:", error);
+			}
+		}
+		await loadVolume();
 
 		function saveProfile(patch) {
 			const { activeLanguage, selectedModelId, voiceId, speed } = state.get();
@@ -323,6 +341,7 @@ export default defineContentScript({
 				fromWord,
 				state.get().speed,
 				state.get().selectedModelId,
+				state.get().volume,
 			);
 		}
 
@@ -362,6 +381,7 @@ export default defineContentScript({
 				if (revision !== operationRevision) return;
 				const language = resolution?.activeLanguage || state.get().activeLanguage;
 				const profile = await loadProfile(language);
+				await loadVolume();
 				if (revision !== operationRevision) return;
 				state.dispatch({ ...resolution, ...profileState(profile), preferencesError: unsavedLanguages.has(language) });
 				fromParagraph = target
@@ -464,6 +484,30 @@ export default defineContentScript({
 				operationRevision++;
 				tts.setSpeed(speed);
 				await saveProfile({ speed });
+			},
+			setVolume(volume) {
+				console.log(`[Pocket Speechify] Volume ${volume} triggered`);
+				const settings = normalizeVolumeSettings({ ...state.get(), volume });
+				const revision = ++volumeRevision;
+				state.dispatch(settings);
+				if (state.get().playback !== "idle") tts.setVolume(settings.volume);
+				volumeWrites = volumeWrites.then(async () => {
+					try {
+						const result = await chrome.runtime.sendMessage({ type: "volume-settings-update", settings });
+						if (!result || result.error) throw new Error(result?.error || "Volume settings unavailable");
+						unsavedVolume = false;
+					} catch (error) {
+						unsavedVolume = true;
+						console.warn("[Pocket Speechify] Could not save volume:", error);
+					}
+					if (revision === volumeRevision) state.dispatch({ volumeSettingsError: unsavedVolume });
+				});
+				return volumeWrites;
+			},
+			toggleMute() {
+				console.log("[Pocket Speechify] Mute toggle triggered");
+				const { volume, lastNonzeroVolume } = state.get();
+				return actions.setVolume(volume === 0 ? lastNonzeroVolume : 0);
 			},
 			async setLanguage(languageId) {
 				console.log(`[Pocket Speechify] Language ${languageId} triggered`);

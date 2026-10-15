@@ -2,6 +2,7 @@ import {
 	waveformIcon,
 	playIcon,
 	pauseIcon,
+	volumeIcon,
 	circularProgress,
 	skipBackIcon,
 	skipForwardIcon,
@@ -307,6 +308,23 @@ export async function initPillPlayer(
 		});
 	});
 	pillMain.appendChild(speedBtn);
+
+	const volumeBtn = document.createElement("button");
+	volumeBtn.className = "btn btn-32 btn-standard volume-button";
+	volumeBtn.setAttribute("aria-label", "Volume");
+	volumeBtn.setAttribute("aria-controls", "volume-panel");
+	function syncVolumeButton(current) {
+		volumeBtn.replaceChildren(volumeIcon(current.volume === 0));
+		volumeBtn.title = current.volume === 0 ? "Volume: muted" : `Volume: ${Math.round(current.volume * 100)}%`;
+		volumeBtn.setAttribute("aria-expanded", String(current.panelOpen === "volume"));
+	}
+	syncVolumeButton(initState);
+	volumeBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		console.log("[Pocket Speechify] Volume button clicked");
+		state.dispatch({ panelOpen: state.get().panelOpen === "volume" ? null : "volume" });
+	});
+	pillMain.appendChild(volumeBtn);
 
 	pill.appendChild(pillMain);
 
@@ -730,6 +748,10 @@ export async function initPillPlayer(
 		// Update speed text
 		if (current.speed !== prev.speed) {
 			speedText.textContent = `${current.speed}x`;
+		}
+
+		if (current.volume !== prev.volume || current.panelOpen !== prev.panelOpen) {
+			syncVolumeButton(current);
 		}
 
 		const { percent } = current.progress;

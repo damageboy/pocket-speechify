@@ -36,7 +36,16 @@ beforeEach(async () => {
     async suspend() { this.state = 'suspended'; }
     async close() { this.state = 'closed'; }
     createBuffer(channels, length) { return { getChannelData: () => new Float32Array(length) }; }
-    createBufferSource() { return { connect() {}, disconnect() {}, start() {}, stop() {} }; }
+    sources = [];
+    createGain() {
+      return { gain: { value: 1, cancelScheduledValues() {}, setTargetAtTime(value) { this.value = value; } },
+        connect(node) { this.output = node; } };
+    }
+    createBufferSource() {
+      const source = { connect(node) { this.output = node; }, disconnect() {}, start() {}, stop() {} };
+      this.sources.push(source);
+      return source;
+    }
   });
   vi.stubGlobal('Worker', class extends EventTarget {
     sent = [];
@@ -76,6 +85,31 @@ async function play(overrides = {}) {
 }
 
 const wordMessages = () => messages.filter(m => m.type === 'tts-word');
+
+it('applies volume to scheduled audio without restarting and keeps mute on the next paragraph', async () => {
+  const { worker, genId, ctx } = await play({ volume: 0.37 });
+  worker.emit({ type: 'chunk', genId, data: new Float32Array(24000) });
+  await vi.advanceTimersByTimeAsync(25);
+  const output = ctx.sources[0].output;
+  expect(output.gain?.value).toBe(0.37);
+  expect(output.output).toBe(ctx.destination);
+  const control = { source: 'service-worker', type: 'tts-set-volume', tabId: 9, sessionId: 'A', genId: 7 };
+  receive({ ...control, volume: 0.82, tabId: 10 });
+  receive({ ...control, volume: 0.82, genId: 6 });
+  expect(output.gain.value).toBe(0.37);
+  receive({ ...control, volume: 0 });
+  expect(output.gain.value).toBe(0);
+  expect(ctx.state).toBe('running');
+  expect(contexts).toHaveLength(1);
+  worker.emit({ type: 'done', genId });
+  ctx.currentTime = 11;
+  await vi.advanceTimersByTimeAsync(25);
+  expect(messages.find(m => m.type === 'tts-paragraph-done')).toMatchObject({ sourceSec: 1 });
+  const next = await play({ startPlayback: false, volume: 0 });
+  next.worker.emit({ type: 'chunk', genId: next.genId, data: new Float32Array(24000) });
+  await vi.advanceTimersByTimeAsync(25);
+  expect(next.ctx.sources[0].output.gain.value).toBe(0);
+});
 
 it('submits and reports processed text after seeking, retaining original highlight indices', async () => {
   const textRules = [

@@ -2,6 +2,7 @@
 import { createWordTimeline } from '../../src/word-timeline.js';
 import { createStretchProcessor } from '../../src/stretch-processor.js';
 import { preprocessText } from '../../src/text-rules.js';
+import { normalizeVolumeSettings } from '../../src/speech-preferences.js';
 import {
   DEFAULT_LANGUAGE_ID,
   buildLanguageConfigYaml,
@@ -26,6 +27,8 @@ const SAMPLE_RATE = 24000;
 const MAX_BUFFERED_SEC = 5; // don't generate more than 5s ahead of playback
 
 let audioCtx = null;
+let volumeGain = null;
+let currentVolume = 1;
 let worker = null;
 let currentGenId = -1;
 let internalGenCounter = 0;
@@ -64,6 +67,9 @@ let paragraphDoneResolve = null;
 function getAudioContext() {
   if (!audioCtx) {
     audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    volumeGain = audioCtx.createGain();
+    volumeGain.gain.value = currentVolume;
+    volumeGain.connect(audioCtx.destination);
   }
   return audioCtx;
 }
@@ -300,7 +306,7 @@ function scheduleOneChunk(stretchedData, rawDurationSec) {
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   // playbackRate is always 1.0 — speed change is in the stretched data
-  source.connect(ctx.destination);
+  source.connect(volumeGain);
 
   nextStartTime = Math.max(nextStartTime, ctx.currentTime);
   source.start(nextStartTime);
@@ -373,6 +379,7 @@ function cancelGeneration(internalGen) {
   if (audioCtx) {
     const oldCtx = audioCtx;
     audioCtx = null;
+    volumeGain = null;
     oldCtx.close().catch(() => {});
   }
 
@@ -401,7 +408,7 @@ function cancelPlayback(genId) {
 browser.runtime.onMessage.addListener((msg) => {
   if (!msg || !msg.type || msg.source !== 'service-worker') return;
   logToSW(`[Offscreen] Received: ${msg.type}`);
-  if (['tts-pause', 'tts-resume', 'tts-cancel', 'tts-set-speed'].includes(msg.type) && !isOwner(msg)) return;
+  if (['tts-pause', 'tts-resume', 'tts-cancel', 'tts-set-speed', 'tts-set-volume'].includes(msg.type) && !isOwner(msg)) return;
 
   switch (msg.type) {
     case 'tts-play-paragraph':
@@ -428,6 +435,14 @@ browser.runtime.onMessage.addListener((msg) => {
       break;
     case 'tts-set-speed':
       handleSetSpeed(msg.speed);
+      break;
+    case 'tts-set-volume':
+      currentVolume = normalizeVolumeSettings({ volume: msg.volume }).volume;
+      if (volumeGain) {
+        // Smooth live changes to avoid clicks, including on already-scheduled audio.
+        volumeGain.gain.cancelScheduledValues(audioCtx.currentTime);
+        volumeGain.gain.setTargetAtTime(currentVolume, audioCtx.currentTime, 0.01);
+      }
       break;
     case 'tts-clear-cache': {
       // In-flight downloads check this epoch before writing, so a clear is not
@@ -547,6 +562,7 @@ async function handlePlayParagraph(msg) {
 
   currentGenId = genId;
   currentSpeed = speed;
+  currentVolume = normalizeVolumeSettings({ volume: msg.volume }).volume;
   const myInternalGen = internalGenCounter;
   const myLoadToken = ++activeLoadToken;
   if (isNewGeneration) paused = false;
