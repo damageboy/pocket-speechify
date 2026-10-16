@@ -1,6 +1,8 @@
 import { loadTextRules } from '../src/text-rules.js';
 import { createSpeechProfileStore, normalizeVolumeSettings, VOLUME_SETTINGS_KEY } from '../src/speech-preferences.js';
 
+const RELOAD_TAB_KEY = 'pocket-speechify-reload-tab';
+
 export default defineBackground(() => {
   const profiles = createSpeechProfileStore(chrome.storage.local);
   let volumeSettingsQueue = Promise.resolve();
@@ -8,6 +10,19 @@ export default defineBackground(() => {
   let offscreenCreating = null;
   // Preserve command order even when offscreen discovery/creation is asynchronous.
   let forwarding = Promise.resolve();
+
+  // Local storage survives extension reload; session storage does not. Consume
+  // this once in the new worker, after its synchronous listeners are registered.
+  const pendingPageReload = chrome.storage.local.get(RELOAD_TAB_KEY).then(async saved => {
+    const pending = saved[RELOAD_TAB_KEY];
+    if (!pending) return;
+    await chrome.storage.local.remove(RELOAD_TAB_KEY);
+    // Don't refresh an unrelated tab if a crash left this behind until a later
+    // browser session, where Chrome may reuse the numeric tab ID.
+    if (Date.now() - pending.requestedAt > 30000) return;
+    console.log('[Pocket Speechify] Page reload after extension restart triggered');
+    await chrome.tabs.reload(pending.tabId);
+  }).catch(error => console.warn('[Pocket Speechify] Pending page reload failed:', error));
 
   async function hasOffscreenDocument() {
     const existingContexts = await chrome.runtime.getContexts({
@@ -52,10 +67,18 @@ export default defineBackground(() => {
     if (sender.tab) {
       if (msg.type === 'extension-reload') {
         console.log('[Pocket Speechify] Extension reload request triggered');
-        // Acknowledge before reloading tears down this message channel.
-        sendResponse({ ok: true });
-        chrome.runtime.reload();
-        return;
+        pendingPageReload.then(async () => {
+          await chrome.storage.local.set({
+            [RELOAD_TAB_KEY]: { tabId: sender.tab.id, requestedAt: Date.now() },
+          });
+          // Acknowledge before reloading tears down this message channel.
+          sendResponse({ ok: true });
+          chrome.runtime.reload();
+        }).catch(error => {
+          console.warn('[Pocket Speechify] Extension reload failed:', error);
+          sendResponse({ error: String(error) });
+        });
+        return true;
       }
       if (msg.type === 'site-visibility-get' || msg.type === 'site-visibility-set') {
         const result = siteVisibilityQueue.then(async () => {

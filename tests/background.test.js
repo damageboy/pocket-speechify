@@ -1,7 +1,7 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { DEFAULT_TEXT_RULES, TEXT_RULES_KEY } from '../src/text-rules.js';
 
-let receive, tabRemoved, tabUpdated;
+let background, receive, tabRemoved, tabUpdated;
 beforeEach(async () => {
   vi.resetModules();
   vi.stubGlobal('chrome', {
@@ -20,19 +20,61 @@ beforeEach(async () => {
     },
     action: { onClicked: { addListener() {} } },
   });
-  const { default: background } = await import('../entrypoints/background.js');
+  background = (await import('../entrypoints/background.js')).default;
   background.main();
+  await Promise.resolve();
+  chrome.storage.local.get.mockClear();
 });
 
-it('reloads on a content-script request without starting the audio pipeline', () => {
-  chrome.runtime.reload = vi.fn();
-  const respond = vi.fn();
-  receive({ type: 'extension-reload', source: 'offscreen' }, {}, respond);
-  expect(chrome.runtime.reload).not.toHaveBeenCalled();
-  receive({ type: 'extension-reload', source: 'content' }, { tab: { id: 1 } }, respond);
-  expect(chrome.runtime.reload).toHaveBeenCalledTimes(1);
-  expect(respond).toHaveBeenCalledWith({ ok: true });
-  expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
+it.each(['open', 'closed', 'expired'])('refreshes only the requesting tab after extension restart, once (%s tab)', async (tabState) => {
+  const stored = {};
+  chrome.storage.local.get.mockImplementation(async key => ({ [key]: stored[key] }));
+  chrome.storage.local.set = async values => Object.assign(stored, structuredClone(values));
+  chrome.storage.local.remove = async key => { delete stored[key]; };
+  let extensionReloads = 0;
+  chrome.runtime.reload = () => { extensionReloads++; };
+  const refreshed = [];
+  chrome.tabs.reload = async id => {
+    expect(extensionReloads).toBe(1);
+    if (tabState === 'closed') throw new Error('No tab with id: 42');
+    refreshed.push(id);
+  };
+  receive({ type: 'extension-reload', source: 'offscreen' }, {}, () => {});
+  expect(extensionReloads).toBe(0);
+  const response = await new Promise(resolve => {
+    receive({ type: 'extension-reload', tabId: 7 }, { tab: { id: 42 } }, resolve);
+  });
+  expect(response).toEqual({ ok: true });
+  expect(extensionReloads).toBe(1);
+  expect(refreshed).toEqual([]);
+  if (tabState === 'expired') vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60000);
+  try {
+    // A new worker has no in-memory state from the request, only Chrome storage.
+    vi.resetModules();
+    background = (await import('../entrypoints/background.js')).default;
+    background.main();
+    await vi.waitFor(() => {
+      expect(stored).toEqual({});
+      expect(refreshed).toEqual(tabState === 'open' ? [42] : []);
+    });
+    background.main();
+    await Promise.resolve();
+    expect(refreshed).toEqual(tabState === 'open' ? [42] : []);
+    expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+  }
+});
+
+it('reports a pending-tab save failure without reloading the extension', async () => {
+  chrome.storage.local.set = async () => { throw new Error('Disk full'); };
+  let reloaded = false;
+  chrome.runtime.reload = () => { reloaded = true; };
+  const result = await new Promise(resolve => {
+    receive({ type: 'extension-reload' }, { tab: { id: 42 } }, resolve);
+  });
+  expect(result.error).toContain('Disk full');
+  expect(reloaded).toBe(false);
 });
 
 it('attaches defaults, current saved rules, and an intentionally empty list to paragraph requests', async () => {
