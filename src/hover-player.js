@@ -21,6 +21,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions, geometry = n
 	let isOverButton = false;
 
 	function showAt(rect, index) {
+		if (state.get().pillUserHidden) return;
 		if (fadeOutTimer !== null) {
 			clearTimeout(fadeOutTimer);
 			fadeOutTimer = null;
@@ -61,6 +62,10 @@ export function initHoverPlayer(shadow, state, paragraphs, actions, geometry = n
 		btn.style.display = "none";
 		btn.classList.remove("fade-out");
 	}
+
+	state.subscribe((current) => {
+		if (current.pillUserHidden) hideImmediate();
+	});
 
 	function scheduleHide() {
 		if (hideDelayTimer !== null) clearTimeout(hideDelayTimer);
@@ -125,6 +130,7 @@ export function initHoverPlayer(shadow, state, paragraphs, actions, geometry = n
 
 	btn.addEventListener("mouseenter", () => {
 		console.log("[Pocket Speechify] Hover play button hover triggered");
+		if (state.get().pillUserHidden) return;
 		isOverButton = true;
 		if (hideDelayTimer !== null) {
 			clearTimeout(hideDelayTimer);

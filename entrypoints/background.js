@@ -4,6 +4,7 @@ import { createSpeechProfileStore, normalizeVolumeSettings, VOLUME_SETTINGS_KEY 
 export default defineBackground(() => {
   const profiles = createSpeechProfileStore(chrome.storage.local);
   let volumeSettingsQueue = Promise.resolve();
+  let siteVisibilityQueue = Promise.resolve();
   let offscreenCreating = null;
   // Preserve command order even when offscreen discovery/creation is asynchronous.
   let forwarding = Promise.resolve();
@@ -55,6 +56,27 @@ export default defineBackground(() => {
         sendResponse({ ok: true });
         chrome.runtime.reload();
         return;
+      }
+      if (msg.type === 'site-visibility-get' || msg.type === 'site-visibility-set') {
+        const result = siteVisibilityQueue.then(async () => {
+          // Use Chrome's sender URL, not a hostname supplied by the message.
+          const { hostname } = new URL(sender.url);
+          if (!hostname) return { visible: null };
+          const key = `pocket-speechify-site-visibility:${hostname}`;
+          if (msg.type === 'site-visibility-set') {
+            if (typeof msg.visible !== 'boolean') throw new Error('Invalid site visibility');
+            await chrome.storage.local.set({ [key]: msg.visible });
+            return { visible: msg.visible };
+          }
+          const saved = (await chrome.storage.local.get(key))[key];
+          return { visible: typeof saved === 'boolean' ? saved : null };
+        });
+        siteVisibilityQueue = result.catch(() => {});
+        result.then(sendResponse, error => {
+          console.warn('[Pocket Speechify] Site visibility request failed:', error);
+          sendResponse({ error: String(error) });
+        });
+        return true;
       }
       if (msg.type === 'volume-settings-get' || msg.type === 'volume-settings-update') {
         const result = volumeSettingsQueue.then(async () => {

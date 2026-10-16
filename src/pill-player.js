@@ -713,6 +713,7 @@ export async function initPillPlayer(
 		state.dispatch({ pillUserHidden: true });
 		const container = shadow.querySelector(".pill-container");
 		if (container) container.style.display = "none";
+		options.onVisibilityChange?.(false);
 	});
 	pillBottom.appendChild(turnOffBtn);
 

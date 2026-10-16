@@ -36,8 +36,8 @@ function getPlayableContentStatus(contentSource, articleDetection) {
 	);
 }
 
-function shouldAutoShow(contentSource, articleDetection) {
-	return Boolean(
+function shouldAutoShow(contentSource, articleDetection, siteVisibility) {
+	return siteVisibility ?? Boolean(
 		contentSource.metadata?.autoShow || articleDetection.isReadableArticle,
 	);
 }
@@ -110,14 +110,23 @@ export default defineContentScript({
 			contentSource,
 			articleDetection,
 		);
+		let siteVisibility = null;
+		try {
+			const result = await chrome.runtime.sendMessage({ type: "site-visibility-get" });
+			if (!result || result.error) throw new Error(result?.error || "Site visibility unavailable");
+			siteVisibility = result.visible;
+		} catch (error) {
+			console.warn("[Pocket Speechify] Could not load site visibility:", error);
+		}
 		console.log(
-			`[Pocket Speechify] Article detection triggered: site=${contentSource.site}, autoShow=${shouldAutoShow(contentSource, articleDetection)}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence}`,
+			`[Pocket Speechify] Article detection triggered: site=${contentSource.site}, autoShow=${shouldAutoShow(contentSource, articleDetection, siteVisibility)}, playable=${hasPlayableContent}, confidence=${articleDetection.confidence}`,
 		);
 
 		const state = createState({
 			...languageResolution,
 			...profileState(initialProfile),
 			hasPlayableContent,
+			pillUserHidden: siteVisibility === false,
 		});
 
 		let volumeWrites = Promise.resolve();
@@ -545,9 +554,21 @@ export default defineContentScript({
 
 		updateProgress();
 
+		async function saveSiteVisibility(visible) {
+			siteVisibility = visible;
+			if (visible) initializePlaybackHelpers(state.get().hasPlayableContent, true);
+			try {
+				const result = await chrome.runtime.sendMessage({ type: "site-visibility-set", visible });
+				if (!result || result.error) throw new Error(result?.error || "Site visibility unavailable");
+			} catch (error) {
+				console.warn("[Pocket Speechify] Could not save site visibility:", error);
+			}
+		}
+
 		await initPillPlayer(shadow, state, actions, paragraphs, {
-			initiallyVisible: shouldAutoShow(contentSource, articleDetection),
+			initiallyVisible: shouldAutoShow(contentSource, articleDetection, siteVisibility),
 			hasPlayableContent,
+			onVisibilityChange: saveSiteVisibility,
 		});
 
 		// Toolbar button: toggle pill visibility
@@ -559,6 +580,7 @@ export default defineContentScript({
 			const isHidden = container.style.display === "none";
 			container.style.display = isHidden ? "" : "none";
 			state.dispatch({ pillUserHidden: !isHidden });
+			void saveSiteVisibility(isHidden);
 			console.log(
 				`[Pocket Speechify] pill toggled, display: ${container.style.display || "visible"}`,
 			);
@@ -585,7 +607,7 @@ export default defineContentScript({
 
 		initializePlaybackHelpers(
 			hasPlayableContent,
-			shouldAutoShow(contentSource, articleDetection),
+			shouldAutoShow(contentSource, articleDetection, siteVisibility),
 		);
 
 		contentSource.subscribe(() => {
@@ -596,7 +618,7 @@ export default defineContentScript({
 				contentSource,
 				nextArticleDetection,
 			);
-			const nextAutoShow = shouldAutoShow(contentSource, nextArticleDetection);
+			const nextAutoShow = shouldAutoShow(contentSource, nextArticleDetection, siteVisibility);
 			console.log(
 				`[Pocket Speechify] Content source updated: site=${contentSource.site}, paragraphs=${paragraphs.length}, playable=${nextHasPlayableContent}`,
 			);
