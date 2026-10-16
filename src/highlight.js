@@ -1,19 +1,10 @@
 import { createRangeFromOffsets, isProgrammaticScroll, scrollToCenter } from './dom-utils.js';
+import { highlightColors } from './highlight-colors.js';
 
 const PARAGRAPH_HIGHLIGHT = 'pocket-speechify-paragraph';
 const WORD_HIGHLIGHT = 'pocket-speechify-word';
 const AUTO_SCROLL_MARGIN_PX = 60;
 let autoScrollEnabled = true;
-
-function isDarkBackground(element) {
-  for (let node = element; node; node = node.parentElement) {
-    const match = getComputedStyle(node).backgroundColor.match(/[\d.]+/g);
-    if (!match) continue;
-    const [r, g, b, a = 1] = match.map(Number);
-    if (a > 0) return (0.299 * r + 0.587 * g + 0.114 * b) / 255 <= 0.5;
-  }
-  return false;
-}
 
 /** Re-enable following after the user clicks scroll-to-highlight. */
 export function enableAutoScroll() {
@@ -31,11 +22,13 @@ function createRangePainter(paragraphs) {
   style.dataset.psHighlight = 'style';
   document.head.appendChild(style);
   let lastParagraph = null;
+  let paragraphRange = null;
 
   function clear() {
     CSS.highlights.delete(PARAGRAPH_HIGHLIGHT);
     CSS.highlights.delete(WORD_HIGHLIGHT);
     lastParagraph = null;
+    paragraphRange = null;
   }
 
   function update(current, follow = false) {
@@ -47,18 +40,30 @@ function createRangePainter(paragraphs) {
 
     if (lastParagraph !== paragraph) {
       clear();
-      const dark = isDarkBackground(paragraph.element);
-      style.textContent = `
-        ::highlight(${PARAGRAPH_HIGHLIGHT}) { background-color: ${dark ? '#444766' : '#e0e3ff'}; }
-        ::highlight(${WORD_HIGHLIGHT}) { background-color: ${dark ? '#5666f0' : '#abb3fe'}; }
-      `;
-      const range = createRangeFromOffsets(paragraph.element, paragraph.startOffset, paragraph.endOffset);
-      if (range) {
-        const highlight = new Highlight(range);
+      paragraphRange = createRangeFromOffsets(paragraph.element, paragraph.startOffset, paragraph.endOffset);
+      if (paragraphRange) {
+        const highlight = new Highlight(paragraphRange);
         highlight.priority = 0;
         CSS.highlights.set(PARAGRAPH_HIGHLIGHT, highlight);
       }
       lastParagraph = paragraph;
+    }
+
+    // Recheck on word boundaries so a page theme change cannot leave a stale
+    // palette behind. Keep the native paragraph range and avoid unchanged CSS writes.
+    if (paragraphRange) {
+      const colors = highlightColors(paragraphRange);
+      const css = `
+        ::highlight(${PARAGRAPH_HIGHLIGHT}) {
+          background-color: ${colors.paragraph};
+          text-decoration: ${colors.paragraph === 'transparent' ? 'underline currentColor' : 'none'};
+        }
+        ::highlight(${WORD_HIGHLIGHT}) {
+          background-color: ${colors.word};
+          text-decoration: ${colors.underline ? 'underline double currentColor' : 'none'};
+        }
+      `;
+      if (style.textContent !== css) style.textContent = css;
     }
 
     CSS.highlights.delete(WORD_HIGHLIGHT);
