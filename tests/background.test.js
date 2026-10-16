@@ -24,6 +24,17 @@ beforeEach(async () => {
   background.main();
 });
 
+it('reloads on a content-script request without starting the audio pipeline', () => {
+  chrome.runtime.reload = vi.fn();
+  const respond = vi.fn();
+  receive({ type: 'extension-reload', source: 'offscreen' }, {}, respond);
+  expect(chrome.runtime.reload).not.toHaveBeenCalled();
+  receive({ type: 'extension-reload', source: 'content' }, { tab: { id: 1 } }, respond);
+  expect(chrome.runtime.reload).toHaveBeenCalledTimes(1);
+  expect(respond).toHaveBeenCalledWith({ ok: true });
+  expect(chrome.runtime.getContexts).not.toHaveBeenCalled();
+});
+
 it('attaches defaults, current saved rules, and an intentionally empty list to paragraph requests', async () => {
   const saved = [{ name: 'Expand', pattern: 'TTS', flags: 'g', replacement: 'text to speech', enabled: true }];
   chrome.storage.local.get.mockResolvedValueOnce({})

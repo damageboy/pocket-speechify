@@ -49,6 +49,13 @@ export default defineBackground(() => {
 
     // --- Messages FROM content scripts (have sender.tab) ---
     if (sender.tab) {
+      if (msg.type === 'extension-reload') {
+        console.log('[Pocket Speechify] Extension reload request triggered');
+        // Acknowledge before reloading tears down this message channel.
+        sendResponse({ ok: true });
+        chrome.runtime.reload();
+        return;
+      }
       if (msg.type === 'volume-settings-get' || msg.type === 'volume-settings-update') {
         const result = volumeSettingsQueue.then(async () => {
           if (msg.type === 'volume-settings-get') {

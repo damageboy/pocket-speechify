@@ -165,7 +165,18 @@ export async function initPillPlayer(
 
 	function saveSettings() {
 		console.log("[Pocket Speechify] Settings saved:", settings);
-		chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+		return chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+	}
+
+	async function reloadExtension() {
+		console.log("[Pocket Speechify] Extension reload triggered");
+		try {
+			await saveSettings();
+			await chrome.runtime.sendMessage({ type: "extension-reload", source: "content" });
+		} catch (error) {
+			console.error("[Pocket Speechify] Extension reload failed:", error);
+			window.alert("Could not reload Pocket Speechify. Refresh this page and try again, or reload it from chrome://extensions.");
+		}
 	}
 
 	// --- Pill container ---
@@ -399,6 +410,7 @@ export async function initPillPlayer(
 	const settingsBtn = document.createElement("button");
 	settingsBtn.className = "btn btn-32 btn-standard";
 	settingsBtn.setAttribute("aria-label", "Settings");
+	settingsBtn.title = "Settings (⌘-click to reload extension; refresh the page afterward)";
 	const settingsIc = settingsIcon();
 	settingsIc.style.width = "20px";
 	settingsIc.style.height = "20px";
@@ -406,6 +418,11 @@ export async function initPillPlayer(
 	settingsBtn.addEventListener("click", (e) => {
 		e.stopPropagation();
 		console.log("[Pocket Speechify] Settings button clicked");
+		if (e.metaKey) {
+			e.preventDefault();
+			void reloadExtension();
+			return;
+		}
 		const existing = shadow.querySelector(".settings-dialog");
 		if (existing) {
 			saveSettings();
@@ -535,6 +552,20 @@ export async function initPillPlayer(
 				});
 				contentBody.appendChild(desc);
 				contentBody.appendChild(btn);
+				const reloadDesc = document.createElement("p");
+				reloadDesc.className = "settings-field-desc";
+				reloadDesc.style.marginTop = "24px";
+				reloadDesc.textContent = "Reloads the installed extension from disk and stops playback. Does not rebuild source files or clear cached assets. Refresh open pages afterward. Shortcut: ⌘-click Settings.";
+				const reloadBtn = document.createElement("button");
+				reloadBtn.className = "settings-action-btn";
+				reloadBtn.textContent = "Reload Extension";
+				reloadBtn.addEventListener("click", (ev) => {
+					ev.stopPropagation();
+					console.log("[Pocket Speechify] Reload Extension button clicked");
+					void reloadExtension();
+				});
+				contentBody.appendChild(reloadDesc);
+				contentBody.appendChild(reloadBtn);
 			} else if (active === "History") {
 				renderHistoryPanel();
 			}

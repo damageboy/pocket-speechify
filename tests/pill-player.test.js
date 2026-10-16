@@ -151,6 +151,26 @@ describe("initPillPlayer", () => {
 		}
 	});
 
+	it.each(['Debug', 'shortcut closed', 'shortcut open'])("reloads the extension through %s without toggling settings", async (trigger) => {
+		const { shadow } = await renderPill();
+		const settings = shadow.querySelector('[aria-label="Settings"]');
+		if (trigger !== 'shortcut closed') settings.click();
+		const dialog = shadow.querySelector('.settings-dialog');
+		expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+		if (trigger === 'Debug') {
+			[...shadow.querySelectorAll('.settings-nav-item')].find(button => button.textContent === 'Debug').click();
+			const reload = [...shadow.querySelectorAll('button')].find(button => button.textContent === 'Reload Extension');
+			expect(reload).toBeDefined();
+			reload.click();
+		} else {
+			settings.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }));
+		}
+		await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledExactlyOnceWith({
+			type: 'extension-reload', source: 'content',
+		}));
+		expect(shadow.querySelector('.settings-dialog')).toBe(dialog);
+	});
+
 	it("updates open history on submissions, including after clearing it", async () => {
 		const { shadow, state } = await renderPill();
 		shadow.querySelector('[aria-label="Settings"]').click();
