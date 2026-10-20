@@ -25,10 +25,10 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 LOCAL_POCKET_TTS_DIR="${POCKET_TTS_DIR:-${POCKET_TTS_REPO:-}}"
 
 if [ -z "$LOCAL_POCKET_TTS_DIR" ] && [ -z "${POCKET_TTS_REF:-}" ] && [ -z "${POCKET_TTS_REPO_URL:-}" ]; then
-	# Republished v3.3.0 with timestamped streaming, source 1e0500de641338ba2c87f609ff47f7a10006f60f.
-	RELEASE_URL=https://github.com/damageboy/pocket-tts/releases/download/v3.3.0/pocket-tts-v3.3.0-wasm-web.tar.gz
-	RELEASE_SHA256=d03e1f6d770d81441144358718ae43fa73c1e945f33c1ce6c796b38df3fdd621
-	echo "=== Downloading pinned pocket-tts v3.3.0 WASM release ==="
+	# v4.0.0 adds small Pocket models with timestamps on the existing Candle backend.
+	RELEASE_URL=https://github.com/damageboy/pocket-tts/releases/download/v4.0.0/pocket-tts-v4.0.0-wasm-web.tar.gz
+	RELEASE_SHA256=eda55652f0f51fd34e649a71b97e5df7f52b86cb497260c919696b0e9ab5d2a1
+	echo "=== Downloading pinned pocket-tts v4.0.0 WASM release ==="
 	if ! curl --fail --location --silent --show-error "$RELEASE_URL" > "$TMP_DIR/wasm-web.tar.gz"; then
 		echo "ERROR: WASM release download failed. Check network access, or set POCKET_TTS_REF to build from source." >&2
 		exit 1
@@ -47,7 +47,7 @@ fi
 
 POCKET_TTS_REPO_URL="${POCKET_TTS_REPO_URL:-https://github.com/damageboy/pocket-tts}"
 # Match the source commit used to build the pinned release above.
-POCKET_TTS_REF="${POCKET_TTS_REF:-1e0500de641338ba2c87f609ff47f7a10006f60f}"
+POCKET_TTS_REF="${POCKET_TTS_REF:-c234d8a94d4f1ca185eb0f06d57c5c2661fc9c50}"
 
 echo "=== Building pocket-tts WASM ==="
 echo "Extension dir: $EXT_DIR"
