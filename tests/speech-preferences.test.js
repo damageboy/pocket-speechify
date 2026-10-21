@@ -1,4 +1,4 @@
-import { beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as preferences from '../src/speech-preferences.js';
 
 let stored, store;
@@ -12,6 +12,49 @@ beforeEach(() => {
     },
     async set(values) { Object.assign(stored, structuredClone(values)); },
   });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  ['mobile client hint', { userAgentData: { mobile: true, platform: '' } }, 'english_18m_2026-10'],
+  ['Android tablet client hint', { userAgentData: { mobile: false, platform: 'Android' } }, 'english_18m_2026-10'],
+  ['Android without client hints', { userAgent: 'Mozilla/5.0 (Linux; Android 16; Pixel Tablet) AppleWebKit/537.36 Chrome/144.0.0.0 Safari/537.36' }, 'english_18m_2026-10'],
+  ['iPhone', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' }, 'english_18m_2026-10'],
+  ['desktop-mode iPad', { platform: 'MacIntel', maxTouchPoints: 5 }, 'english_18m_2026-10'],
+  ['Mac', { userAgentData: { mobile: false, platform: 'macOS' }, platform: 'MacIntel', maxTouchPoints: 0 }, 'english'],
+  ['touchscreen Windows laptop', { userAgentData: { mobile: false, platform: 'Windows' }, maxTouchPoints: 10 }, 'english'],
+  ['unknown device', {}, 'english'],
+])('chooses the default profile for %s without changing other languages', (_label, device, modelId) => {
+  vi.stubGlobal('navigator', device);
+  expect(preferences.normalizeSpeechProfile('english')).toEqual({ modelId, voiceId: 'alba', speed: 1 });
+  expect(preferences.normalizeSpeechProfile('french')).toEqual({ modelId: 'french', voiceId: 'estelle', speed: 1 });
+});
+
+it('uses the native Android OS even with a desktop user agent and retains explicit model choices', async () => {
+  vi.stubGlobal('navigator', { userAgentData: { mobile: false, platform: 'Linux' } });
+  vi.stubGlobal('chrome', { runtime: { getPlatformInfo: async () => ({ os: 'android', arch: 'arm' }) } });
+  expect(await store.get('english')).toEqual({ modelId: 'english_18m_2026-10', voiceId: 'alba', speed: 1 });
+  expect(stored[en]).toBeUndefined(); // Reading a default must not create an explicit preference.
+  expect(await store.update('english', { voiceId: 'vera', speed: 1.3 }))
+    .toEqual({ modelId: 'english_18m_2026-10', voiceId: 'vera', speed: 1.3 });
+  await store.update('english', { modelId: 'english_2026-09' });
+  expect(await store.get('english')).toEqual({ modelId: 'english_2026-09', voiceId: 'vera', speed: 1.3 });
+  stored[en].modelId = 'removed-model';
+  expect(await store.get('english')).toEqual({ modelId: 'english_18m_2026-10', voiceId: 'vera', speed: 1.3 });
+});
+
+it.each(['current', 'legacy'])('preserves a %s saved desktop model on mobile', async source => {
+  vi.stubGlobal('navigator', { userAgentData: { mobile: true, platform: 'Android' } });
+  if (source === 'current') stored[en] = { modelId: 'english', voiceId: 'vera', speed: 1.6 };
+  else stored['pocket-speechify-speech-selection'] = { selectedLanguage: 'english', voiceId: 'vera', speed: 1.6 };
+  expect(await store.get('english')).toEqual({ modelId: 'english', voiceId: 'vera', speed: 1.6 });
+});
+
+it('falls back to browser hints when the native platform API fails', async () => {
+  vi.stubGlobal('navigator', { userAgentData: { mobile: true, platform: 'Android' } });
+  vi.stubGlobal('chrome', { runtime: { getPlatformInfo: async () => { throw new Error('Unavailable'); } } });
+  expect((await store.get('english')).modelId).toBe('english_18m_2026-10');
 });
 
 it('merges concurrent field edits without crossing languages or losing fields', async () => {

@@ -16,6 +16,7 @@ A lightweight Chrome extension that replicates the Speechify text-to-speech UI �
 - **Upstream model catalog** — English, German, Italian, Portuguese, Spanish, French, and Dutch, including dated English releases and 24-layer variants
 - **Automatic language detection** — uses Chrome's text-language detector on readable article content, with page metadata as a fallback and manual selection for the current page
 - **Per-language speech preferences** — remembers a separate model, voice, and playback speed for each language, restoring them across language switches, reloads, and tabs
+- **Mobile-friendly default** — uses the 18M English model on mobile devices unless you have already saved a model choice; desktop and other languages keep their existing defaults
 - **Hover-to-play** — hover over any paragraph to start reading from there
 - **Scroll-to-highlight** — floating nav pill snaps you back to the word being read
 - **Fully offline after first use per language** — model, tokenizer, and voice assets download on demand and are cached locally with the Cache API

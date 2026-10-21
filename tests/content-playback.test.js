@@ -77,7 +77,10 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it('restores an English profile on English pages without overriding French detection', async () => {
+it.each([false, true])('restores an English profile without overriding French detection (mobile=%s)', async mobile => {
+  vi.stubGlobal('navigator', { userAgentData: { mobile, platform: mobile ? 'Android' : 'macOS' } });
+  await loadPage();
+  expect(ui.state.get().selectedModelId).toBe(mobile ? 'english_18m_2026-10' : 'english');
   ui.state.dispatch({ panelOpen: 'voice' });
   const select = ui.shadow.querySelector('.model-selector');
   select.value = 'english_2026-09_24l';

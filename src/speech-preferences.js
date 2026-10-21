@@ -13,10 +13,17 @@ export function normalizeVolumeSettings(value = {}) {
   };
 }
 
-export function normalizeSpeechProfile(language, value = {}) {
+export function normalizeSpeechProfile(language, value = {}, platformOs) {
   const models = LANGUAGES.filter(model => model.language === language);
   if (!models.length) throw new Error(`Unsupported speech language: ${language}`);
-  const fallback = models.find(model => model.id === language) || models.find(model => model.status === 'production') || models[0];
+  const device = globalThis.navigator;
+  const mobile = platformOs === 'android' || device?.userAgentData?.mobile ||
+    device?.userAgentData?.platform === 'Android' ||
+    /Android|Mobi|iPhone|iPad|iPod/i.test(device?.userAgent || '') ||
+    (device?.platform === 'MacIntel' && device.maxTouchPoints > 1);
+  // 18M is English-only. Keep other languages' defaults and all valid saved choices.
+  const fallback = (mobile && models.find(model => model.id === 'english_18m_2026-10')) ||
+    models.find(model => model.id === language) || models.find(model => model.status === 'production') || models[0];
   const model = models.find(model => model.id === value?.modelId) || fallback;
   return {
     modelId: model.id,
@@ -39,11 +46,14 @@ export function createSpeechProfileStore(storage) {
   const legacyKey = 'pocket-speechify-speech-selection';
 
   async function read(language) {
-    const defaults = normalizeSpeechProfile(language);
+    // Native OS detection also covers Android browsers requesting desktop sites.
+    // Content scripts fall back to navigator hints without needing this API.
+    const platform = await globalThis.chrome?.runtime?.getPlatformInfo?.().catch(() => null);
+    const defaults = normalizeSpeechProfile(language, {}, platform?.os);
     const key = keyFor(language);
     const values = await storage.get([key, legacyKey]);
     if (Object.hasOwn(values, key) && values[key] !== undefined) {
-      return normalizeSpeechProfile(language, values[key]);
+      return normalizeSpeechProfile(language, values[key], platform?.os);
     }
     const legacy = values[legacyKey];
     if (isSupportedLanguage(legacy?.selectedLanguage) && getLanguage(legacy.selectedLanguage).language === language) {
