@@ -1,0 +1,1 @@
+@media (pointer:coarse){[data-standard-dialog-close]>[data-slot=dialog-header]>[data-slot=dialog-title]{padding-right:2rem}}@media (width<=767px) and (pointer:coarse){[data-mobile-form-sheet] :is(input,textarea,select,[contenteditable]:not([contenteditable=false])){font-family:system-ui;font-size:max(1rem,16.1px)}}

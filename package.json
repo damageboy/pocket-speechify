@@ -9,6 +9,7 @@
     "build:wasm": "bash scripts/build-wasm.sh",
     "test": "vitest run",
     "test:watch": "vitest",
+    "scrapes": "node scripts/serve-scrapes.mjs",
     "package": "wxt zip"
   },
   "dependencies": {
