@@ -60,6 +60,24 @@ export default defineBackground(() => {
   const tabUrls = new Map();
   const withoutFragment = url => url.split('#')[0];
 
+  function setKeepAwake(active) {
+    try {
+      // Some mobile browsers expose extensions without a working power API.
+      if (active) {
+        if (!chrome.power?.requestKeepAwake) {
+          console.warn('[Pocket Speechify] System wake lock unavailable in this browser');
+          return;
+        }
+        chrome.power.requestKeepAwake('system');
+      } else {
+        chrome.power?.releaseKeepAwake();
+      }
+      console.log(`[Pocket Speechify] System wake lock ${active ? 'requested' : 'released'}`);
+    } catch (error) {
+      console.warn('[Pocket Speechify] System wake lock failed:', error);
+    }
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !msg.type) return;
 
@@ -142,6 +160,12 @@ export default defineBackground(() => {
 
     // --- Messages FROM offscreen document (source: 'offscreen') ---
     if (msg.source === 'offscreen') {
+      if (msg.type === 'tts-keep-awake') {
+        // Offscreen has already checked playback ownership. No worker-local
+        // ownership state to lose when Chrome suspends/restarts this worker.
+        setKeepAwake(msg.active);
+        return;
+      }
       if (msg.type === 'diag') {
         console.log('[DIAG]', msg.message);
         return;
@@ -192,6 +216,9 @@ export default defineBackground(() => {
       console.log('[SW] Message forwarded to offscreen');
     } catch (err) {
       console.error('[SW] handleTTSFromContent error:', err);
+      await cancelOffscreenPlayback({
+        type: 'tts-cancel', tabId, sessionId: msg.sessionId, genId: msg.genId,
+      }).catch(error => console.warn('[SW] Failed playback cleanup:', error));
       if (msg.type === 'tts-play-paragraph') {
         chrome.tabs.sendMessage(tabId, {
           type: 'tts-paragraph-done', sessionId: msg.sessionId, genId: msg.genId, error: String(err), fatal: true,
@@ -200,14 +227,22 @@ export default defineBackground(() => {
     }
   }
 
+  async function cancelOffscreenPlayback(msg) {
+    if (!(await hasOffscreenDocument())) {
+      // No audio owner remains, even if the document vanished unexpectedly.
+      setKeepAwake(false);
+      return;
+    }
+    await chrome.runtime.sendMessage({ ...msg, source: 'service-worker' });
+  }
+
   // Stop orphan audio when the tab that owns playback disappears. Queued on the
   // same chain as play/pause, so a close racing a play cannot start after cancel.
   function cancelTabPlayback(tabId) {
     forwarding = forwarding
       .then(async () => {
-        if (!(await hasOffscreenDocument())) return;
         console.log('[SW] Cancelling playback for tab', tabId);
-        await chrome.runtime.sendMessage({ type: 'tts-cancel-tab', tabId, source: 'service-worker' });
+        await cancelOffscreenPlayback({ type: 'tts-cancel-tab', tabId });
       })
       .catch(err => console.warn('[SW] Tab playback cancel failed:', err));
   }

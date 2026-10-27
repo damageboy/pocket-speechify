@@ -33,7 +33,7 @@ export default defineConfig({
     version,
     version_name: versionName,
     description: 'Text-to-speech with a floating pill player',
-    permissions: ['offscreen', 'storage'],
+    permissions: ['offscreen', 'storage', 'power'],
     // Exposes Google Docs tab URLs so the service worker can tell a fragment
     // change (cursor entering a heading) from a navigation. The <all_urls>
     // content script already implies this access, so no new install warning.

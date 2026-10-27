@@ -85,6 +85,11 @@ function isOwner(msg) {
     msg.sessionId === playbackOwner.sessionId && msg.genId === playbackOwner.genId;
 }
 
+function updateKeepAwake() {
+  // Offscreen owns playback identity, but only the service worker can use power.
+  sendToServiceWorker({ type: 'tts-keep-awake', active: Boolean(playbackOwner && !paused) });
+}
+
 function logToSW(message) {
   console.log(message);
   sendToServiceWorker({ type: 'diag', message });
@@ -401,6 +406,7 @@ function cancelPlayback(genId) {
   cancelGeneration(internalGenCounter - 1);
   if (genId !== undefined) currentGenId = genId;
   playbackOwner = null;
+  updateKeepAwake();
 }
 
 // --- Message handling ---
@@ -414,6 +420,7 @@ browser.runtime.onMessage.addListener((msg) => {
     case 'tts-play-paragraph':
       handlePlayParagraph(msg).catch(err => {
         console.error('[Offscreen] handlePlayParagraph error:', err);
+        if (isOwner(msg)) cancelPlayback();
         // Load/download failures affect every paragraph: report them as fatal.
         sendToServiceWorker({ type: 'tts-paragraph-done', error: err.message, fatal: true }, {
           tabId: msg.tabId, sessionId: msg.sessionId, genId: msg.genId,
@@ -566,6 +573,7 @@ async function handlePlayParagraph(msg) {
   const myInternalGen = internalGenCounter;
   const myLoadToken = ++activeLoadToken;
   if (isNewGeneration) paused = false;
+  updateKeepAwake();
 
   // Seek in original page coordinates before applying the rules supplied by the service worker.
   const pageWords = [...paragraphText.matchAll(/\S+/g)];
@@ -745,10 +753,7 @@ function handleWorkerFailure(workerInstance, message) {
   // A generation has no pending request to reject, so surface it directly.
   if (paragraphDoneResolve) {
     const owner = playbackOwner;
-    internalGenCounter++;
-    activeLoadToken++;
-    cancelGeneration(internalGenCounter - 1);
-    playbackOwner = null;
+    cancelPlayback();
     if (owner) {
       sendToServiceWorker({
         type: 'tts-paragraph-done', genId: currentGenId, error: error.message, fatal: true,
@@ -799,12 +804,14 @@ function handleWorkerMessage(msg) {
 
 function handlePause() {
   paused = true;
+  updateKeepAwake();
   stopScheduler();
   getAudioContext().suspend();
 }
 
 function handleResume() {
   paused = false;
+  updateKeepAwake();
   const ctx = getAudioContext();
   ctx.resume();
   startScheduler();

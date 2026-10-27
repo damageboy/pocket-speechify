@@ -103,6 +103,27 @@ describe("RemoteTTS speech-rate measurement", () => {
 	});
 });
 
+it('signals playback cleanup only after the final paragraph', () => {
+  const tts = new RemoteTTS();
+  const deliver = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+  tts.play([paragraph('One.'), paragraph('Two.')]);
+  const { genId, sessionId } = chrome.runtime.sendMessage.mock.calls.at(-1)[0];
+  const end = vi.fn();
+  tts.addEventListener('end', end);
+  chrome.runtime.sendMessage.mockClear();
+  deliver({ type: 'tts-paragraph-done', genId, sessionId, sourceSec: 1 });
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    type: 'tts-play-paragraph', paragraphText: 'Two.', startPlayback: false,
+  }));
+  expect(end).not.toHaveBeenCalled();
+  chrome.runtime.sendMessage.mockClear();
+  deliver({ type: 'tts-paragraph-done', genId, sessionId, sourceSec: 1 });
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledExactlyOnceWith({
+    type: 'tts-cancel', genId, sessionId, source: 'content',
+  });
+  expect(end).toHaveBeenCalledTimes(1);
+});
+
 it('distinguishes reloaded clients and ignores old completion during first play', () => {
   const old = new RemoteTTS();
   old.play([paragraph()]);

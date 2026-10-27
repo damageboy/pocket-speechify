@@ -26,6 +26,33 @@ beforeEach(async () => {
   chrome.storage.local.get.mockClear();
 });
 
+it('applies offscreen system wake-lock changes even after a service-worker restart', () => {
+  let level = null;
+  chrome.power = {
+    requestKeepAwake: value => { level = value; },
+    releaseKeepAwake: () => { level = null; },
+  };
+  receive({ source: 'offscreen', type: 'tts-keep-awake', active: true }, {});
+  expect(level).toBe('system');
+  // Page scripts cannot bypass the offscreen player's ownership checks.
+  receive({ source: 'offscreen', type: 'tts-keep-awake', active: false }, { tab: { id: 42 } });
+  expect(level).toBe('system');
+  background.main();
+  receive({ source: 'offscreen', type: 'tts-keep-awake', active: false }, {});
+  expect(level).toBeNull();
+});
+
+it.each(['missing', 'throws'])('keeps routing playback when the power API %s', async mode => {
+  if (mode === 'throws') chrome.power = {
+    requestKeepAwake() { throw new Error('Not supported'); },
+    releaseKeepAwake() { throw new Error('Not supported'); },
+  };
+  expect(() => receive({ source: 'offscreen', type: 'tts-keep-awake', active: true }, {})).not.toThrow();
+  expect(() => receive({ source: 'offscreen', type: 'tts-keep-awake', active: false }, {})).not.toThrow();
+  receive({ type: 'tts-resume', sessionId: 'A', genId: 1 }, { tab: { id: 1 } });
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'tts-resume' })));
+});
+
 it.each(['open', 'closed', 'expired'])('refreshes only the requesting tab after extension restart, once (%s tab)', async (tabState) => {
   const stored = {};
   chrome.storage.local.get.mockImplementation(async key => ({ [key]: stored[key] }));
@@ -118,10 +145,13 @@ it('reports a rules read failure to its owner and continues forwarding the next 
   expect(chrome.tabs.sendMessage).toHaveBeenCalledExactlyOnceWith(1, {
     type: 'tts-paragraph-done', sessionId: 'A', genId: 2, error: 'Error: rules unavailable', fatal: true,
   });
-  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledExactlyOnceWith({
+  await vi.waitFor(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
     type: 'tts-play-paragraph', sessionId: 'B', genId: 3, tabId: 4,
     source: 'service-worker', textRules: DEFAULT_TEXT_RULES,
   }));
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+    type: 'tts-cancel', sessionId: 'A', genId: 2, tabId: 1, source: 'service-worker',
+  });
 });
 
 it('routes original ownership while another tab is awaiting offscreen readiness', async () => {
@@ -200,12 +230,15 @@ it('keeps playback through same-document fragment updates but not reloads or nav
 });
 
 it('does not create an offscreen document just to cancel a closed tab', async () => {
+  let awake = true;
+  chrome.power = { releaseKeepAwake: () => { awake = false; } };
   chrome.runtime.getContexts.mockResolvedValue([]);
   tabRemoved(7);
   await vi.waitFor(() => expect(chrome.runtime.getContexts).toHaveBeenCalled());
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(chrome.offscreen.createDocument).not.toHaveBeenCalled();
   expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  expect(awake).toBe(false);
 });
 
 it('drops a play from a tab that no longer exists', async () => {

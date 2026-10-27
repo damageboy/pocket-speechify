@@ -106,6 +106,8 @@ export class RemoteTTS extends EventTarget {
   #sendCurrentParagraph() {
     const entry = this.#indexMap[this.#currentEntryIdx];
     if (!entry) {
+      // Final completion also releases offscreen resources and the system wake lock.
+      this.#send({ type: 'tts-cancel' });
       this.dispatchEvent(new CustomEvent('end'));
       return;
     }

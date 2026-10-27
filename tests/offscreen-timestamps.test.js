@@ -85,6 +85,32 @@ async function play(overrides = {}) {
 }
 
 const wordMessages = () => messages.filter(m => m.type === 'tts-word');
+const keepAwake = () => messages.findLast(m => m.type === 'tts-keep-awake')?.active;
+
+it('holds the system awake across paragraphs, releases on pause and completion, and ignores stale controls', async () => {
+  const first = await play();
+  expect(keepAwake()).toBe(true);
+  first.worker.emit({ type: 'done', genId: first.genId });
+  await vi.advanceTimersByTimeAsync(25);
+  expect(keepAwake()).toBe(true);
+  await play({ startPlayback: false, paragraphIndex: 3 });
+  const control = { source: 'service-worker', tabId: 9, sessionId: 'A', genId: 7 };
+  receive({ ...control, type: 'tts-pause' });
+  expect(keepAwake()).toBe(false);
+  // A continuation already in flight must not reacquire while paused.
+  await play({ startPlayback: false, paragraphIndex: 4 });
+  expect(keepAwake()).toBe(false);
+  receive({ ...control, type: 'tts-resume' });
+  expect(keepAwake()).toBe(true);
+  const next = await play({ tabId: 10, sessionId: 'B', genId: 8 });
+  receive({ ...control, type: 'tts-cancel' });
+  receive({ ...control, type: 'tts-pause' });
+  receive({ ...control, sessionId: 'B', tabId: 10, type: 'tts-cancel' });
+  expect(keepAwake()).toBe(true);
+  receive({ ...control, sessionId: 'B', tabId: 10, genId: 8, type: 'tts-cancel' });
+  expect(keepAwake()).toBe(false);
+  expect(next.ctx.state).toBe('closed');
+});
 
 it('applies volume to scheduled audio without restarting and keeps mute on the next paragraph', async () => {
   const { worker, genId, ctx } = await play({ volume: 0.37 });
@@ -265,9 +291,11 @@ it('keeps asynchronous load failure attached to its original owner', async () =>
   const failOld = rejectFetch;
   caches.open = async () => ({ match: async () => ({ arrayBuffer: async () => new ArrayBuffer(1) }) });
   await play({ tabId: 10, sessionId: 'B' });
+  expect(keepAwake()).toBe(true);
   failOld(new Error('old download failed'));
   await vi.advanceTimersByTimeAsync(0);
   expect(messages.find(m => m.type === 'tts-paragraph-done')).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
+  expect(keepAwake()).toBe(true);
 });
 
 it.each([200, 206])('resumes download with HTTP %i and caches exactly the final bytes', async status => {
@@ -401,8 +429,10 @@ it('cancels playback only for the tab that owned it', async () => {
   const { worker, genId, ctx } = await play();
   receive({ source: 'service-worker', type: 'tts-cancel-tab', tabId: 10 });
   expect(ctx.state).toBe('running');
+  expect(keepAwake()).toBe(true);
   receive({ source: 'service-worker', type: 'tts-cancel-tab', tabId: 9 });
   expect(ctx.state).toBe('closed');
+  expect(keepAwake()).toBe(false);
   const count = wordMessages().length;
   worker.emit({ type: 'chunk', genId, data: new Float32Array(24000) });
   worker.emit({ type: 'done', genId });
@@ -424,6 +454,7 @@ it('reports a worker failure during loading as a fatal error without waiting for
   expect(done).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
   expect(done.error).toContain('TTS worker failed');
   expect(done.error).toContain('wasm aborted');
+  expect(keepAwake()).toBe(false);
 });
 
 it('reports an unresponsive worker load as a fatal error after the timeout', async () => {
@@ -435,6 +466,7 @@ it('reports an unresponsive worker load as a fatal error after the timeout', asy
   const done = messages.find(m => m.type === 'tts-paragraph-done');
   expect(done).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
   expect(done.error).toContain('did not respond');
+  expect(keepAwake()).toBe(false);
 });
 
 it('reports a worker crash during generation and cancels the paragraph', async () => {
@@ -447,6 +479,7 @@ it('reports a worker crash during generation and cancels the paragraph', async (
   expect(done).toMatchObject({ tabId: 9, sessionId: 'A', genId: 7, fatal: true });
   expect(done.error).toContain('worker crashed');
   expect(ctx.state).toBe('closed');
+  expect(keepAwake()).toBe(false);
   const count = messages.filter(m => m.type === 'tts-paragraph-done').length;
   await vi.advanceTimersByTimeAsync(1000);
   expect(messages.filter(m => m.type === 'tts-paragraph-done')).toHaveLength(count);
@@ -499,14 +532,17 @@ it.each(['tts-pause', 'tts-cancel'])('honors %s while the first play is awaiting
     paragraphIndex: 0, startSentenceIndex: 0, sentenceWordOffsets: [0], speed: 1, textRules: [] });
   await vi.advanceTimersByTimeAsync(0);
   const ctx = contexts.at(-1);
+  expect(keepAwake()).toBe(true);
   receive({ source: 'service-worker', type, tabId: 9, sessionId: 'A', genId: 7 });
   loaded(new ArrayBuffer(1));
   await vi.advanceTimersByTimeAsync(25);
   expect(ctx.state).toBe(type === 'tts-pause' ? 'suspended' : 'closed');
+  expect(keepAwake()).toBe(false);
   expect(messages.some(m => m.type === 'tts-paragraph-done')).toBe(false);
   if (type === 'tts-cancel') expect(workers).toHaveLength(0);
   else {
     receive({ source: 'service-worker', type: 'tts-resume', tabId: 9, sessionId: 'A', genId: 7 });
     expect(ctx.state).toBe('running');
+    expect(keepAwake()).toBe(true);
   }
 });
