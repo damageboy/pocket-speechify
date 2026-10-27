@@ -10,6 +10,9 @@ key.pem
 public/wasm/pocket_tts.js
 public/wasm/pocket_tts_bg.wasm
 
+# Saved-page captures are private local development data
+/web-page-scrapes/
+
 # Dev tools
 .playwright-mcp/
 trace.json.gz
